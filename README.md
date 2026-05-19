@@ -8,6 +8,15 @@ This repository is built for teams that already use TencentDB Agent Memory as an
 
 This project is not TencentDB Agent Memory itself. It is an operational toolchain around TencentDB Agent Memory's seed workflow.
 
+**Required prerequisite:** the host OpenClaw runtime must already expose the TencentDB Agent Memory seed CLI:
+
+~~~bash
+openclaw memory-tdai --help
+openclaw memory-tdai seed --help
+~~~
+
+If those commands are unavailable, install/upgrade/fix the OpenClaw plugin registration layer first. This repository does not patch OpenClaw or bundle private registration fixes.
+
 ## OpenClaw Large-History Focus
 
 The first-class use case is adapting **large OpenClaw historical conversation archives** for TencentDB Agent Memory.
@@ -363,6 +372,15 @@ You can, but you should not. Batch the month, audit after each batch, and stop o
 它不是 TencentDB Agent Memory 本体，而是帮助你把旧的 agent 对话记录整理成 TencentDB Agent Memory seed 输入，并在隔离 shadow 目录里先跑一遍、审计质量，再决定是否继续扩大处理范围。
 
 核心目标是：把历史记忆回填做得可审计、可暂停、可回滚，不污染 live 记忆库。
+
+**使用前提：**运行环境必须已经能调用 TencentDB Agent Memory 的 seed CLI：
+
+~~~bash
+openclaw memory-tdai --help
+openclaw memory-tdai seed --help
+~~~
+
+如果这两个命令不可用，需要先安装、升级或修复 OpenClaw 的插件注册层。这个仓库不修改 OpenClaw 本体，也不内置私有注册修补代码。
 
 ## 针对 OpenClaw 超大历史对话记录
 
