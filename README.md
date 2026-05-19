@@ -526,20 +526,6 @@ node src/tdb-shadow-audit.mjs \
 
 不要一开始就直接 live merge。
 
-## 开源注意事项
-
-公开前只确认一件事：仓库里只有工具代码和示例数据，没有真实运行数据或本地配置。
-
-建议至少检查：
-
-~~~bash
-npm run scan:secrets
-git ls-files
-git status
-~~~
-
-必要时再用组织级 secret scanner 复查。
-
 ## 一句话总结
 
 TDB History Shadow Tools 是一套给 TencentDB Agent Memory 历史记忆回填用的安全操作工具。它不负责替代 TDB，也不负责直接 live merge；它负责把历史 seed 过程变成可批处理、可审计、可暂停、可复查的 shadow workflow。
