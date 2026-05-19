@@ -63,6 +63,19 @@ Typical host environment:
 
 The code has OpenClaw-oriented adapters because it was first built around OpenClaw transcript layouts. The privacy boundary is intentionally strict: real transcripts and real generated seed outputs are not included in this repository.
 
+## OpenClaw CLI Prerequisite
+
+This repository does not patch OpenClaw itself.
+
+It assumes the host environment already exposes a working TencentDB Agent Memory seed command, for example:
+
+~~~bash
+openclaw memory-tdai --help
+openclaw memory-tdai seed --help
+~~~
+
+If those commands are unavailable, fix or upgrade the OpenClaw / plugin registration layer first. This toolchain intentionally does not include private local OpenClaw dist patches, plugin registration fixes, or fallback runtime imports.
+
 ## Repository Contents
 
 - src/tdb-history-inventory.mjs: scans local transcript files and creates a month/session inventory.
@@ -419,6 +432,19 @@ OpenClaw 的历史记录通常不是干净的“用户一句、助手一句”�
 - 你没有 TencentDB Agent Memory seed CLI
 - 你不准备做人工审计
 - 你想把真实 transcript、seed input、audit 直接开源
+
+## OpenClaw CLI 前提
+
+这个仓库不修改 OpenClaw 本体。
+
+它假设你的运行环境里已经有可用的 TencentDB Agent Memory seed 命令，例如：
+
+~~~bash
+openclaw memory-tdai --help
+openclaw memory-tdai seed --help
+~~~
+
+如果这两个命令不可用，需要先修复或升级 OpenClaw / 插件注册层。这个工具链不会包含私有的 OpenClaw dist patch、插件注册修补，或本机 fallback runtime import。
 
 ## 安全原则
 
