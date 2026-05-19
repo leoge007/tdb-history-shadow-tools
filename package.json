@@ -1,0 +1,20 @@
+{
+  "name": "tdb-history-shadow-tools",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Shadow-only tooling for building, seeding, and auditing historical TencentDB Agent Memory inputs.",
+  "license": "MIT",
+  "bin": {
+    "tdb-history-inventory": "./src/tdb-history-inventory.mjs",
+    "tdb-seed-input-builder": "./src/tdb-seed-input-builder.mjs",
+    "tdb-shadow-seed-runner": "./src/tdb-shadow-seed-runner.mjs",
+    "tdb-shadow-audit": "./src/tdb-shadow-audit.mjs"
+  },
+  "scripts": {
+    "scan:secrets": "node scripts/scan-secrets.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

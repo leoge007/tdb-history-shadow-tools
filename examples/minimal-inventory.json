@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "rows": [
+    {
+      "month": "2026-01",
+      "sourceType": "agent:example",
+      "file": "~/example-openclaw/agents/example/sessions/example-session.jsonl",
+      "sessionId": "example-session",
+      "sessionKey": "agent:example:example-session",
+      "messageCount": 2
+    }
+  ],
+  "totals": {
+    "2026-01": {
+      "sessions": 1,
+      "messages": 2
+    }
+  }
+}

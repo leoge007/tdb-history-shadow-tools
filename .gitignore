@@ -1,0 +1,37 @@
+# Local/private OpenClaw state
+.openclaw/
+tmp/
+runs/
+inputs/
+audits/
+shadow/
+
+# Seed inputs and generated configs may contain private transcript data or API keys.
+*.seed-config.json
+*.jsonl
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+vectors.db*
+run.log
+run-summary.json
+live-before.json
+live-after.json
+persona.md
+scene_blocks/
+conversations/
+records/
+
+# Environment and credentials
+.env
+.env.*
+*.pem
+*.key
+*.token
+
+# Node/editor noise
+node_modules/
+.DS_Store
+.idea/
+.vscode/
