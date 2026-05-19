@@ -1,5 +1,7 @@
 # TDB History Shadow Tools
 
+[English introduction](#tdb-history-shadow-tools) | [中文说明](#中文说明)
+
 Utilities for safely preparing, running, and auditing historical conversation backfills for TencentDB Agent Memory.
 
 This repository is built for teams that already use TencentDB Agent Memory as an agent memory layer and want to import older conversation transcripts without polluting the live memory database. It focuses on a shadow-only workflow: build clean seed inputs, run the official seed command into an isolated output directory, audit the result, then decide separately whether any live operation is safe.
