@@ -6,6 +6,26 @@ This repository is built for teams that already use TencentDB Agent Memory as an
 
 This project is not TencentDB Agent Memory itself. It is an operational toolchain around TencentDB Agent Memory's seed workflow.
 
+## OpenClaw Large-History Focus
+
+The first-class use case is adapting **large OpenClaw historical conversation archives** for TencentDB Agent Memory.
+
+OpenClaw can accumulate a large number of agent/session transcript JSONL files over time: direct chats, channel conversations, agent sessions, long-running task sessions, tool-heavy turns, and reset/archive sidecars. Those records are useful for memory backfill, but they are not safe to feed directly into a memory seed pipeline.
+
+This project is specifically designed for that situation:
+
+- many months of OpenClaw transcript history
+- thousands to tens of thousands of messages
+- multiple agents and session files
+- repeated local message IDs across sessions
+- mixed user/assistant/tool/system records
+- untrusted channel metadata and delivery envelopes
+- large batch processing that must be resumable and auditable
+
+The tools convert that historical OpenClaw-style data into strict TencentDB Agent Memory seed inputs, run the seed process in shadow mode, and audit the result before any live-memory decision is considered.
+
+It can be adapted to other transcript sources, but its original design target is not a small generic importer. It is an operational safety layer for **large-scale OpenClaw history backfill into TencentDB Agent Memory**.
+
 ## What This Solves
 
 TencentDB Agent Memory can capture and extract memory from ongoing agent conversations. Historical transcripts are harder:
@@ -354,6 +374,33 @@ You can, but you should not. Batch the month, audit after each batch, and stop o
 它不是 TencentDB Agent Memory 本体，而是帮助你把旧的 agent 对话记录整理成 TencentDB Agent Memory seed 输入，并在隔离 shadow 目录里先跑一遍、审计质量，再决定是否继续扩大处理范围。
 
 核心目标是：把历史记忆回填做得可审计、可暂停、可回滚，不污染 live 记忆库。
+
+## 针对 OpenClaw 超大历史对话记录
+
+这个工具的第一目标场景，是把 **OpenClaw 长期积累的大规模历史对话记录** 适配成 TencentDB Agent Memory 可安全 seed 的输入。
+
+OpenClaw 的历史记录通常不是干净的“用户一句、助手一句”：
+
+- 有大量 agent/session JSONL 文件
+- 有 direct chat、channel、agent task、长任务会话等不同来源
+- 有工具调用、系统消息、外部频道 metadata、delivery envelope
+- 有 reset/archive sidecar
+- 不同 session 里的局部 message ID 可能重复
+- 单月可能有几千到几万条消息
+
+这些数据有价值，但不能直接喂给 TencentDB Agent Memory。直接导入会有污染 live memory、重复写入、错误 overlap、系统提示词进入记忆、API 配置泄漏等风险。
+
+所以这个仓库做的是一层安全适配：
+
+1. 扫描 OpenClaw 历史 transcript
+2. 清洗出严格 user/assistant rounds
+3. 给 sourceKey 加 session/source 命名空间
+4. 按月份和批次生成 seed input
+5. 只跑 shadow seed，不写 live
+6. 审计 L0/L1、污染、重复、overlap、embedding/FTS 覆盖
+7. 通过审计后，再由人决定是否继续扩大历史月份处理
+
+它可以扩展到别的 transcript 来源，但原始设计目标不是“小型通用 JSONL 导入器”，而是 **OpenClaw 超大历史记录到 TencentDB Agent Memory 的安全 shadow backfill 工具链**。
 
 ## 适用场景
 
