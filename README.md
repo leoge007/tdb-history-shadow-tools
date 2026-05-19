@@ -93,6 +93,7 @@ If those commands are unavailable, fix or upgrade the OpenClaw / plugin registra
 - src/tdb-seed-input-builder.mjs: builds strict TencentDB Agent Memory seed input JSON from the inventory.
 - src/tdb-shadow-seed-runner.mjs: runs the official seed command into a shadow output directory. It requires an explicit --config and never generates config from live OpenClaw state.
 - src/tdb-shadow-audit.mjs: audits shadow output and generates a Markdown report.
+- src/tdb-history-shadow.mjs: optional one-command wrapper for inventory → input → shadow seed → audit.
 - src/tdb-history-lib.mjs: shared cleaning, parsing, dedupe, audit, and safety helpers.
 - scripts/scan-secrets.mjs: lightweight pre-commit safety scan for common secret and privacy leaks.
 - examples/minimal-inventory.json: fake sample data only. No real transcript data is included.
@@ -177,6 +178,20 @@ Meaning:
 - TDB_HISTORY_MONTHS: optional comma-separated month allowlist for inventory reports
 
 ## End-to-End Workflow
+
+### One-command shadow run
+
+Use the wrapper when you want the standard sequence in one command:
+
+~~~bash
+tdb-history-shadow run \
+  --month 2026-04 \
+  --batch-size 300 \
+  --batch-index 1 \
+  --config /secure/local/path/seed-config.json
+~~~
+
+Use `--dry-run` to print the planned commands without executing them.
 
 ### 1. Inventory transcripts
 
@@ -458,10 +473,25 @@ npm run scan:secrets
 - tdb-seed-input-builder.mjs：从 inventory 构建严格 user/assistant round 的 seed input
 - tdb-shadow-seed-runner.mjs：调用官方 seed CLI，把结果写到 shadow 目录
 - tdb-shadow-audit.mjs：审计 shadow 输出质量
+- tdb-history-shadow.mjs：可选的一键入口，串起 inventory → input → shadow seed → audit
 - tdb-history-lib.mjs：共享的清洗、去重、解析和审计逻辑
 - scan-secrets.mjs：提交前安全扫描
 
 ## 推荐使用流程
+
+### 一键 shadow run
+
+标准流程可以直接用一个命令串起来：
+
+~~~bash
+tdb-history-shadow run \
+  --month 2026-04 \
+  --batch-size 300 \
+  --batch-index 1 \
+  --config /secure/local/path/seed-config.json
+~~~
+
+想先看计划、不执行，就加 `--dry-run`。
 
 ### 1. 生成 inventory
 
