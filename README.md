@@ -88,24 +88,7 @@ If those commands are unavailable, fix or upgrade the OpenClaw / plugin registra
 
 ## Safety Model
 
-This repository is designed around one rule:
-
-Never commit private conversation data or runtime secrets.
-
-The .gitignore blocks common dangerous artifacts:
-
-- tmp/
-- *.jsonl
-- *.db
-- *.db-*
-- *.seed-config.json
-- .env
-- run.log
-- run-summary.json
-- conversations/
-- records/
-- scene_blocks/
-- vectors.db*
+This repository contains tooling only. Keep all real runtime data, generated artifacts, and local configuration out of Git.
 
 Before every commit, run:
 
@@ -113,7 +96,7 @@ Before every commit, run:
 npm run scan:secrets
 ~~~
 
-The scan is intentionally lightweight. For sensitive deployments, also run your own organization-specific secret scanner and private-name blocklist before publishing.
+The scan is intentionally lightweight. For sensitive deployments, also run your own organization-specific secret scanner before publishing.
 
 ## Important Security Decisions
 
@@ -339,16 +322,7 @@ If FTS is complete but vector coverage has a small scattered gap, keyword recall
 
 ### Generated configs
 
-Do not store real seed configs in this repo. A seed config can include:
-
-- LLM API keys
-- embedding API keys
-- provider base URLs
-- model routing details
-- retention settings
-- capture/extraction pipeline settings
-
-Keep it outside the repository.
+Do not store real seed configs in this repo. Keep generated local configuration outside the repository.
 
 ## FAQ
 
@@ -448,29 +422,15 @@ openclaw memory-tdai seed --help
 
 ## 安全原则
 
-最重要的一条：
+这个仓库只放工具代码。真实运行数据、生成产物和本地配置不要进入 Git。
 
-真实对话数据、seed input、DB、run log、seed config 都不能提交。
-
-这些文件通常包含：
-
-- 私人对话内容
-- 用户 ID
-- 频道元数据
-- 工具调用内容
-- LLM API key
-- embedding API key
-- provider base URL
-- 本机路径
-- 项目私密信息
-
-仓库里的 .gitignore 已经默认拦截常见危险文件，但你仍然应该每次提交前跑：
+每次提交前运行：
 
 ~~~bash
 npm run scan:secrets
 ~~~
 
-如果你的环境有更严格的隐私词表，也应该额外跑一遍自己的 blocklist 扫描。
+如需公开发布，再额外使用自己的隐私词表或组织级 secret scanner 复查。
 
 ## 工具组成
 
@@ -568,25 +528,9 @@ node src/tdb-shadow-audit.mjs \
 
 ## 开源注意事项
 
-这个仓库可以开源的是工具代码，不是你的历史数据。
+公开前只确认一件事：仓库里只有工具代码和示例数据，没有真实运行数据或本地配置。
 
-不能提交：
-
-- tmp/
-- *.jsonl
-- *.db
-- *.seed-config.json
-- run.log
-- run-summary.json
-- conversations/
-- records/
-- scene_blocks/
-- 真实 audit
-- 真实 input
-- OpenClaw 配置
-- 任何 API key
-
-公开前建议至少检查：
+建议至少检查：
 
 ~~~bash
 npm run scan:secrets
@@ -594,7 +538,7 @@ git ls-files
 git status
 ~~~
 
-并额外用自己的隐私词表扫一遍。
+必要时再用组织级 secret scanner 复查。
 
 ## 一句话总结
 
