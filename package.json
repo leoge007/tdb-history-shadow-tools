@@ -10,12 +10,14 @@
     "tdb-seed-input-builder": "./src/tdb-seed-input-builder.mjs",
     "tdb-shadow-seed-runner": "./src/tdb-shadow-seed-runner.mjs",
     "tdb-shadow-audit": "./src/tdb-shadow-audit.mjs",
-    "tdb-history-shadow": "./src/tdb-history-shadow.mjs"
+    "tdb-history-shadow": "./src/tdb-history-shadow.mjs",
+    "tdb-live-seed-runner": "./src/tdb-live-seed-runner.mjs",
+    "tdb-live-verify": "./src/tdb-live-verify.mjs"
   },
   "scripts": {
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "test": "node --test",
-    "check": "npm run scan:secrets && npm test && node --check src/tdb-history-shadow.mjs && node --check src/tdb-history-lib.mjs && node --check src/tdb-shadow-audit.mjs && node --check src/tdb-shadow-seed-runner.mjs && node --check src/tdb-seed-input-builder.mjs && node --check src/tdb-history-inventory.mjs"
+    "check": "npm run scan:secrets && npm test && node --check src/tdb-history-shadow.mjs && node --check src/tdb-history-lib.mjs && node --check src/tdb-shadow-audit.mjs && node --check src/tdb-shadow-seed-runner.mjs && node --check src/tdb-seed-input-builder.mjs && node --check src/tdb-history-inventory.mjs && node --check src/tdb-live-seed-runner.mjs && node --check src/tdb-live-verify.mjs"
   },
   "engines": {
     "node": ">=20"

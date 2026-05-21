@@ -4,7 +4,7 @@
 
 Utilities for safely preparing, running, and auditing historical conversation backfills for TencentDB Agent Memory.
 
-This repository is built for teams that already use TencentDB Agent Memory as an agent memory layer and want to import older conversation transcripts without polluting the live memory database. It focuses on a shadow-only workflow: build clean seed inputs, run the official seed command into an isolated output directory, audit the result, then decide separately whether any live operation is safe.
+This repository is built for teams that already use TencentDB Agent Memory as an agent memory layer and want to import older conversation transcripts without blindly polluting the live memory database. It focuses on a staged workflow: build clean seed inputs, run the official seed command into an isolated shadow output directory, audit the result, then feed the audited input into the live TencentDB Agent Memory capture path when you explicitly choose to do so.
 
 This project is not TencentDB Agent Memory itself. It is an operational toolchain around TencentDB Agent Memory's seed workflow.
 
@@ -56,6 +56,8 @@ This toolchain addresses those risks with a conservative workflow:
 - namespace source keys to reduce cross-session false overlap
 - run seed output into a shadow directory
 - audit L0/L1 counts, L1 types, overlap, suspicious records, FTS coverage, embedding coverage, and live pollution
+- optionally feed audited batches into live TencentDB Agent Memory via its capture API
+- verify that live L0/L1 records appeared under the expected seed session keys
 - keep generated private data out of Git
 
 ## Product Target
@@ -94,6 +96,8 @@ If those commands are unavailable, fix or upgrade the OpenClaw / plugin registra
 - src/tdb-shadow-seed-runner.mjs: runs the official seed command into a shadow output directory. It requires an explicit --config and never generates config from live OpenClaw state.
 - src/tdb-shadow-audit.mjs: audits shadow output and generates a Markdown report.
 - src/tdb-history-shadow.mjs: optional one-command wrapper for inventory → input → shadow seed → audit.
+- src/tdb-live-seed-runner.mjs: feeds an already-audited input batch into the live TencentDB Agent Memory capture API. It requires --yes-live.
+- src/tdb-live-verify.mjs: verifies live L0/L1 rows, L1 types, embedding coverage, and FTS coverage for a seeded month.
 - src/tdb-history-lib.mjs: shared cleaning, parsing, dedupe, audit, and safety helpers.
 - scripts/scan-secrets.mjs: lightweight pre-commit safety scan for common secret and privacy leaks.
 - examples/minimal-inventory.json: fake sample data only. No real transcript data is included.
@@ -126,15 +130,21 @@ The runner refuses to write into the live TencentDB Agent Memory directory. Use 
 $HOME/.openclaw/tmp/tdb-shadow-seed/2026-04/batch-001
 ~~~
 
-3. Inputs are private by default
+3. Live import is a separate explicit step
+
+The live runner does not copy a shadow SQLite database into the live store. It replays the audited strict rounds through TencentDB Agent Memory's live capture API, so TDB itself performs L0 capture, L1 extraction, scene/persona updates, and recall indexing according to its own runtime pipeline.
+
+It requires --yes-live so a shadow validation command cannot accidentally become a live import.
+
+4. Inputs are private by default
 
 Seed input JSON files are derived from real transcripts and should be treated as private data. Do not commit them.
 
-4. Audits may still be private
+5. Audits may still be private
 
 Audit reports can contain scene names, excerpts, memory content, and operational details. Treat generated audits as private unless separately redacted.
 
-5. No fallback runtime is bundled
+6. No fallback runtime is bundled
 
 The public version only calls the official CLI path. It does not include local fallback code that imports a private local plugin checkout.
 
@@ -278,6 +288,34 @@ node src/tdb-seed-input-builder.mjs \
 
 Continue until the selected month has no more strict rounds.
 
+### 6. Feed an audited batch into live TencentDB Agent Memory
+
+After the shadow audit passes, feed the same audited input into the live TDB capture path:
+
+~~~bash
+node src/tdb-live-seed-runner.mjs \
+  --input tmp/tdb-history/inputs/2026-04-batch-001.json \
+  --month 2026-04 \
+  --batch-id batch-001 \
+  --gateway-url http://127.0.0.1:8420 \
+  --yes-live
+~~~
+
+This is the final "make TDB use it" step. It sends the cleaned historical user/assistant rounds to TencentDB Agent Memory's live capture API. It does not manually promote L1 records and does not replace TDB's own memory pipeline.
+
+### 7. Verify the live import
+
+~~~bash
+node src/tdb-live-verify.mjs --month 2026-04
+~~~
+
+Expected result:
+
+- live L0 rows exist for session keys ending in `:seed:2026-04`
+- live L1 rows exist for the same month
+- L1 FTS coverage matches L1 row count when the FTS table is available
+- missing L1 embeddings are visible in the summary
+
 ## Batch Strategy
 
 Recommended defaults:
@@ -317,6 +355,8 @@ Stop the workflow if any batch shows:
 - clustered LLM extraction failures
 - materially high missing-embedding rate
 - seed output written to a live memory directory
+- live capture API failure
+- live verification returns zero L0 or zero L1 rows after a live import
 
 ## Operational Notes
 
@@ -358,7 +398,7 @@ No. It is a companion toolchain for historical backfill operations around Tencen
 
 ### Does this write to live memory?
 
-It is designed not to. The runner writes to a shadow directory and snapshots live memory before/after for safety checks.
+The shadow runner does not. The live runner does, but only when called separately with --yes-live. The live runner uses TencentDB Agent Memory's capture API; it does not copy shadow databases into live storage.
 
 ### Can I publish generated audit reports?
 
@@ -384,9 +424,9 @@ You can, but you should not. Batch the month, audit after each batch, and stop o
 
 这个仓库是一套围绕 TencentDB Agent Memory 的历史对话回填工具。
 
-它不是 TencentDB Agent Memory 本体，而是帮助你把旧的 agent 对话记录整理成 TencentDB Agent Memory seed 输入，并在隔离 shadow 目录里先跑一遍、审计质量，再决定是否继续扩大处理范围。
+它不是 TencentDB Agent Memory 本体，而是帮助你把旧的 agent 对话记录整理成 TencentDB Agent Memory seed 输入，先在隔离 shadow 目录里跑一遍、审计质量；通过后，再把同一份已审计 input 喂进 live TencentDB Agent Memory capture pipeline。
 
-核心目标是：把历史记忆回填做得可审计、可暂停、可回滚，不污染 live 记忆库。
+核心目标是：把历史记忆回填做得可审计、可暂停、可回滚；只有通过审计的数据才进入 live TDB。
 
 **使用前提：**运行环境必须已经能调用 TencentDB Agent Memory 的 seed CLI：
 
@@ -418,9 +458,10 @@ OpenClaw 的历史记录通常不是干净的“用户一句、助手一句”�
 2. 清洗出严格 user/assistant rounds
 3. 给 sourceKey 加 session/source 命名空间
 4. 按月份和批次生成 seed input
-5. 只跑 shadow seed，不写 live
+5. 先跑 shadow seed，不写 live
 6. 审计 L0/L1、污染、重复、overlap、embedding/FTS 覆盖
-7. 通过审计后，再由人决定是否继续扩大历史月份处理
+7. 通过审计后，用 live runner 把已清洗 rounds 发送到 TDB live capture API
+8. 再验证 live L0/L1 是否按 seed session key 出现
 
 它可以扩展到别的 transcript 来源，但原始设计目标不是“小型通用 JSONL 导入器”，而是 **OpenClaw 超大历史记录到 TencentDB Agent Memory 的安全 shadow backfill 工具链**。
 
@@ -434,10 +475,11 @@ OpenClaw 的历史记录通常不是干净的“用户一句、助手一句”�
 - 你不想一上来就写 live memory
 - 你需要按月、按批次审计 L0/L1 产出质量
 - 你担心历史数据里有系统提示词、工具输出、聊天元数据、重复消息或隐私泄漏
+- 你需要在质量门通过后，把历史数据真正喂进 TencentDB Agent Memory live 候选池
 
 不适合这些情况：
 
-- 你想直接把所有历史数据一次性 merge 到 live
+- 你想跳过 shadow 审计，直接把所有历史数据一次性写进 live
 - 你没有 TencentDB Agent Memory seed CLI
 - 你不准备做人工审计
 - 你想把真实 transcript、seed input、audit 直接开源
@@ -474,6 +516,8 @@ npm run scan:secrets
 - tdb-shadow-seed-runner.mjs：调用官方 seed CLI，把结果写到 shadow 目录
 - tdb-shadow-audit.mjs：审计 shadow 输出质量
 - tdb-history-shadow.mjs：可选的一键入口，串起 inventory → input → shadow seed → audit
+- tdb-live-seed-runner.mjs：把已通过审计的 input 喂给 live TencentDB Agent Memory capture API
+- tdb-live-verify.mjs：检查 live L0/L1、L1 类型、embedding 和 FTS 覆盖
 - tdb-history-lib.mjs：共享的清洗、去重、解析和审计逻辑
 - scan-secrets.mjs：提交前安全扫描
 
@@ -549,6 +593,34 @@ node src/tdb-shadow-audit.mjs \
 - embedding/FTS 覆盖情况
 - LLM extraction warning 是否集中爆发
 
+### 5. 通过审计后喂给 live TDB
+
+~~~bash
+node src/tdb-live-seed-runner.mjs \
+  --input tmp/tdb-history/inputs/2026-04-batch-001.json \
+  --month 2026-04 \
+  --batch-id batch-001 \
+  --gateway-url http://127.0.0.1:8420 \
+  --yes-live
+~~~
+
+这一步才是“让 TDB 用起来”。
+
+它不是把 shadow DB 迁移过去，也不是手工挑 L1。它是把已经清洗过、审计通过的历史 user/assistant rounds 重新送进 TencentDB Agent Memory 的 live capture API，由 TDB 自己完成 L0 记录、L1 抽取、scene/persona 更新和 recall 索引。
+
+### 6. 验证 live 是否吃进去
+
+~~~bash
+node src/tdb-live-verify.mjs --month 2026-04
+~~~
+
+重点看：
+
+- live L0 是否出现 `:seed:2026-04` session key
+- live L1 是否出现同月记录
+- L1 FTS 是否覆盖同月 L1
+- L1 embedding 缺失率是否可接受
+
 ## 停机线
 
 出现以下情况就停，不要继续跑后续批次：
@@ -563,6 +635,8 @@ node src/tdb-shadow-audit.mjs \
 - LLM extraction failure 集中爆发
 - missing embedding rate 明显过高
 - shadow output 写到了 live memory 目录
+- live capture API 失败
+- live 导入后 L0 或 L1 仍然是 0
 
 ## 批量处理建议
 
@@ -572,10 +646,11 @@ node src/tdb-shadow-audit.mjs \
 2. 审计通过后扩大到整月
 3. 每批 seed 后立刻 audit
 4. 一个自然月跑完后生成 aggregate summary
-5. 多个月都 shadow-only 通过后，再单独讨论 live 安全评估
+5. 质量门通过后，用 live runner 按批次喂给 TDB
+6. 每批 live 后立刻 verify
 
-不要一开始就直接 live merge。
+不要跳过 shadow 审计；但审计通过后，不需要再搞一套手工 promotion，直接走 live runner。
 
 ## 一句话总结
 
-TDB History Shadow Tools 是一套给 TencentDB Agent Memory 历史记忆回填用的安全操作工具。它不负责替代 TDB，也不负责直接 live merge；它负责把历史 seed 过程变成可批处理、可审计、可暂停、可复查的 shadow workflow。
+TDB History Shadow Tools 是一套给 TencentDB Agent Memory 历史记忆回填用的安全操作工具。它不替代 TDB，也不接管 TDB 的 L1/recall/晋升逻辑；它负责把历史数据清洗、审计，然后用 live capture API 喂给 TDB，让 TDB 自己继续跑记忆 pipeline。
