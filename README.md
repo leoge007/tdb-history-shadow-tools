@@ -60,6 +60,38 @@ This toolchain addresses those risks with a conservative workflow:
 - verify that live L0/L1 records appeared under the expected seed session keys
 - keep generated private data out of Git
 
+
+## v0.3 L0-first Fast Import
+
+The live backfill workflow is now intentionally L0-first:
+
+```text
+prepare seed input -> import L0 rows -> verify L0 delta -> let TencentDB Agent Memory build L1/L2/L3 later
+```
+
+Use this when historical inputs are already cleaned into TencentDB-compatible seed batches and you want a lightweight live import without waiting for the full seed pipeline.
+
+```bash
+node src/tdb-fast-l0-import.mjs --month 2026-04 --batch-id batch-003          # dry-run
+node src/tdb-fast-l0-import.mjs --month 2026-04 --batch-id batch-003 --execute # live L0 import with guardrails
+```
+
+The direct importer writes only the L0 surfaces needed for baseline verification:
+
+- `conversations/YYYY-MM-DD.jsonl`
+- `l0_conversations`
+- `l0_fts`
+
+It deliberately does **not** write L1/L2/L3/persona records, does not run promotion, and does not wait for memory extraction. TencentDB Agent Memory remains responsible for its own higher-level memory pipeline.
+
+The importer requires an accepted-batch manifest under `tmp/tdb-history/live-runs/<month>-accepted-batches.json` and verifies each batch by L0 delta:
+
+```text
+expected capture-equivalent L0 == after live L0 - before live L0
+```
+
+If the baseline is misaligned or duplicate rows already exist, it stops before writing.
+
 ## Product Target
 
 Primary target:
@@ -98,6 +130,8 @@ If those commands are unavailable, fix or upgrade the OpenClaw / plugin registra
 - src/tdb-history-shadow.mjs: optional one-command wrapper for inventory → input → shadow seed → audit.
 - src/tdb-live-seed-runner.mjs: feeds an already-audited input batch into the live TencentDB Agent Memory capture API. It requires --yes-live.
 - src/tdb-live-verify.mjs: verifies live L0/L1 rows, L1 types, embedding coverage, and FTS coverage for a seeded month.
+- src/tdb-capture-equivalent.mjs: mirrors TencentDB L0 capture sanitization for expected-L0 planning.
+- src/tdb-fast-l0-import.mjs: L0-first live importer with baseline/delta guardrails.
 - src/tdb-history-lib.mjs: shared cleaning, parsing, dedupe, audit, and safety helpers.
 - scripts/scan-secrets.mjs: lightweight pre-commit safety scan for common secret and privacy leaks.
 - examples/minimal-inventory.json: fake sample data only. No real transcript data is included.
@@ -132,9 +166,7 @@ $HOME/.openclaw/tmp/tdb-shadow-seed/2026-04/batch-001
 
 3. Live import is a separate explicit step
 
-The live runner does not copy a shadow SQLite database into the live store. It replays the audited strict rounds through TencentDB Agent Memory's live capture API, so TDB itself performs L0 capture, L1 extraction, scene/persona updates, and recall indexing according to its own runtime pipeline.
-
-It requires --yes-live so a shadow validation command cannot accidentally become a live import.
+Live import is never part of shadow validation. Use either the official live seed runner or the L0-first direct importer with explicit live flags. The L0-first importer only writes L0 JSONL/SQLite/FTS surfaces and leaves L1/L2/L3/persona generation to TencentDB Agent Memory.
 
 4. Inputs are private by default
 
