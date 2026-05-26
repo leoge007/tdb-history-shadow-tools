@@ -269,6 +269,9 @@ Output:
 - tmp/tdb-history/inputs/2026-04-batch-001.rejects.jsonl
 
 The input contains strict conversation rounds. Rejects explain what was filtered out.
+Cross-session duplicate normalized content is recorded as a warning by default, not dropped. Use
+`--reject-batch-duplicates` only when you explicitly want cross-session duplicates removed from a
+batch.
 
 ### 3. Run TencentDB Agent Memory seed in shadow mode
 

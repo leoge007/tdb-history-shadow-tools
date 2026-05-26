@@ -10,6 +10,7 @@ import {
   INPUTS_DIR,
   LIVE_TDB_DIR,
   TMP_ROOT,
+  assertValidMonth,
   ensureDir,
   expandHome,
   parseArgs,
@@ -20,8 +21,8 @@ import { buildCaptureEquivalentExpected } from "./tdb-capture-equivalent.mjs";
 
 const require = createRequire(import.meta.url);
 const args = parseArgs(process.argv.slice(2));
-const month = String(args.month || "2026-04");
-const batchId = String(args["batch-id"] || "batch-003");
+const month = assertValidMonth(args.month || "2026-04");
+const batchId = assertValidBatchId(args["batch-id"] || "batch-003");
 const execute = Boolean(args.execute);
 const acceptExisting = Boolean(args["accept-existing"]);
 const inputPath = path.join(INPUTS_DIR, `${month}-${batchId}.json`);
@@ -36,6 +37,7 @@ const importReportPath = path.join(AUDITS_DIR, `${month}-${batchId}-l0-import-re
 const liveRunsDir = path.join(TMP_ROOT, "live-runs", `${month}-${batchId}-fast-l0-import`);
 const summaryPath = path.join(OFFLOAD_DIR, `${month}-${batchId}.import-summary.jsonl`);
 const mmdPath = path.join(MMDS_DIR, `${month}.mmd`);
+const journalPath = path.join(liveRunsDir, "import-journal.json");
 const EXECUTE_BATCHES_BY_MONTH = new Map([
   ["2026-02", new Set(Array.from({ length: 6 }, (_, i) => `batch-${String(i + 1).padStart(3, "0")}`))],
   ["2026-03", new Set(Array.from({ length: 12 }, (_, i) => `batch-${String(i + 1).padStart(3, "0")}`))],
@@ -71,12 +73,13 @@ if (acceptExisting) {
   await writeImportSummary(dryRows, null, "dry-run");
   await updateMmdCanvas(dryRows, null, "dry-run", dryRunPath, summaryPath);
   await updateImportIndex(null, "dry-run", summaryPath, dryRunPath);
-  await fsp.writeFile(dryRunPath, renderDryRun(), "utf8");
+  await writePrivateFile(dryRunPath, renderDryRun());
   console.log(JSON.stringify({
     reportPath: relativeToHome(dryRunPath),
     summaryPath: relativeToHome(summaryPath),
     mmdPath: relativeToHome(mmdPath),
     importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
+    journalPath: relativeToHome(journalPath),
     mode: "dry-run",
     month,
     batchId,
@@ -129,6 +132,7 @@ async function acceptExistingImport() {
     mmdPath: relativeToHome(mmdPath),
     importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
     manifestPath: relativeToHome(manifestPath),
+    journalPath: relativeToHome(journalPath),
     mode: "accept-existing",
     decision: "OK",
     month,
@@ -152,7 +156,7 @@ async function acceptExistingImport() {
     jsonlPath: relativeToHome(path.join(liveDir, "conversations", `${formatLocalDate(new Date())}.jsonl`)),
     sqlPath: relativeToHome(path.join(liveRunsDir, "insert-l0.sql")),
   };
-  await fsp.writeFile(importReportPath, renderImportReport(result, { l0: baselineL0, l0Fts: baselineL0, l0Vec: null }, after, []), "utf8");
+  await writePrivateFile(importReportPath, renderImportReport(result, { l0: baselineL0, l0Fts: baselineL0, l0Vec: null }, after, []));
   return result;
 }
 
@@ -170,19 +174,41 @@ async function executeImport() {
   await ensureDir(OFFLOAD_DIR);
   await ensureDir(MMDS_DIR);
   const sqlPath = path.join(liveRunsDir, "insert-l0.sql");
+  const jsonlSidecarPath = path.join(liveRunsDir, "conversations-append.jsonl");
   const jsonlPath = path.join(liveDir, "conversations", `${formatLocalDate(new Date())}.jsonl`);
   const sql = renderInsertSql(rows);
-  await fsp.writeFile(sqlPath, sql, "utf8");
+  const jsonl = rows.map((row) => JSON.stringify(row.jsonlRecord)).join("\n") + "\n";
+  await writePrivateFile(sqlPath, sql);
+  await writePrivateFile(jsonlSidecarPath, jsonl);
+  await writeImportJournal({
+    status: "planned",
+    month,
+    batchId,
+    startedAt: startedAtIso,
+    before,
+    expectedDeltaL0: capture.expectedCount,
+    sqlPath: relativeToHome(sqlPath),
+    jsonlPath: relativeToHome(jsonlPath),
+    jsonlSidecarPath: relativeToHome(jsonlSidecarPath),
+  });
 
   const sqliteStartMs = Date.now();
   sqliteWrite(dbPath, `.read ${sqlPath}`);
   const sqliteDurationMs = Date.now() - sqliteStartMs;
+  await writeImportJournal({
+    status: "sqlite-committed",
+    sqliteCommittedAt: new Date().toISOString(),
+    sqliteWriteSeconds: Number((sqliteDurationMs / 1000).toFixed(3)),
+  });
 
-  await ensureDir(path.dirname(jsonlPath));
-  const jsonl = rows.map((row) => JSON.stringify(row.jsonlRecord)).join("\n") + "\n";
   const jsonlStartMs = Date.now();
-  await fsp.appendFile(jsonlPath, jsonl, "utf8");
+  await appendFileDurably(jsonlPath, jsonl);
   const jsonlDurationMs = Date.now() - jsonlStartMs;
+  await writeImportJournal({
+    status: "jsonl-appended",
+    jsonlAppendedAt: new Date().toISOString(),
+    jsonlAppendSeconds: Number((jsonlDurationMs / 1000).toFixed(3)),
+  });
 
   const endedAtMs = Date.now();
   const after = queryLiveCounts(month);
@@ -221,6 +247,7 @@ async function executeImport() {
     mmdPath: relativeToHome(mmdPath),
     importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
     manifestPath: relativeToHome(manifestPath),
+    journalPath: relativeToHome(journalPath),
     mode: "execute",
     decision: ok ? "OK" : "STOP",
     month,
@@ -242,9 +269,19 @@ async function executeImport() {
     realExtra,
     plannedJsonlRows: rows.length,
     jsonlPath: relativeToHome(jsonlPath),
+    jsonlSidecarPath: relativeToHome(jsonlSidecarPath),
     sqlPath: relativeToHome(sqlPath),
   };
-  await fsp.writeFile(importReportPath, renderImportReport(result, before, after, missingKeys), "utf8");
+  await writeImportJournal({
+    status: ok ? "verified-ok" : "verified-stop",
+    completedAt: new Date(endedAtMs).toISOString(),
+    after,
+    actualDeltaL0,
+    actualDeltaFts,
+    realMissing: missingKeys.length,
+    realExtra,
+  });
+  await writePrivateFile(importReportPath, renderImportReport(result, before, after, missingKeys));
   return result;
 }
 
@@ -282,11 +319,12 @@ function assertExecutePreflight(before, beforeDuplicateKeys) {
 }
 
 function queryLiveCounts(targetMonth) {
+  const like = seedMonthLike(targetMonth);
   const sql = [
     "select",
-    `(select count(*) from l0_conversations where session_key like '%seed:${targetMonth}%'),`,
-    `(select count(*) from l0_fts where session_key like '%seed:${targetMonth}%'),`,
-    `(select count(*) from l0_vec_rowids where id in (select record_id from l0_conversations where session_key like '%seed:${targetMonth}%'));`,
+    `(select count(*) from l0_conversations where session_key like ${sqlValue(like)}),`,
+    `(select count(*) from l0_fts where session_key like ${sqlValue(like)}),`,
+    `(select count(*) from l0_vec_rowids where id in (select record_id from l0_conversations where session_key like ${sqlValue(like)}));`,
   ].join(" ");
   const out = sqlite(dbPath, sql).trim();
   const [l0, l0Fts, l0Vec] = out.split("|").map(Number);
@@ -294,10 +332,11 @@ function queryLiveCounts(targetMonth) {
 }
 
 function queryLiveCompareKeys(targetMonth) {
+  const like = seedMonthLike(targetMonth);
   const rows = sqliteJson(dbPath, `
     select session_key, role, timestamp, message_text
     from l0_conversations
-    where session_key like '%seed:${targetMonth}%';
+    where session_key like ${sqlValue(like)};
   `);
   return new Set(rows.map((r) => `${r.session_key}\t${r.role}\t${Number(r.timestamp) || 0}\t${normalizedContentHash(r.message_text || "")}`));
 }
@@ -398,7 +437,7 @@ async function updateAcceptedManifest(afterL0) {
   };
   if (existingIndex >= 0) manifest.batches[existingIndex] = entry;
   else manifest.batches.push(entry);
-  await fsp.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writePrivateFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function writeImportSummary(rows, resultSummary, mode) {
@@ -418,7 +457,7 @@ async function writeImportSummary(rows, resultSummary, mode) {
     };
     return JSON.stringify(entry);
   });
-  await fsp.writeFile(summaryPath, `${lines.join("\n")}\n`, "utf8");
+  await writePrivateFile(summaryPath, `${lines.join("\n")}\n`);
 }
 
 async function updateMmdCanvas(rows, resultSummary, mode, reportPath, sumPath) {
@@ -491,7 +530,7 @@ async function updateMmdCanvas(rows, resultSummary, mode, reportPath, sumPath) {
   const body = nonMetadataStart >= 0 ? mmdLines.slice(nonMetadataStart) : mmdLines;
   const final = [...mergedMeta, ...body];
 
-  await fsp.writeFile(mmdPath, final.join("\n"), "utf8");
+  await writePrivateFile(mmdPath, final.join("\n"));
 }
 
 async function updateImportIndex(resultSummary, mode, sumPath, reportPath) {
@@ -527,7 +566,7 @@ async function updateImportIndex(resultSummary, mode, sumPath, reportPath) {
   };
 
   index.updatedAt = new Date().toISOString();
-  await fsp.writeFile(IMPORT_INDEX_PATH, `${JSON.stringify(index, null, 2)}\n`, "utf8");
+  await writePrivateFile(IMPORT_INDEX_PATH, `${JSON.stringify(index, null, 2)}\n`);
 }
 
 function renderImportReport(result, before, after, missingKeys) {
@@ -615,6 +654,47 @@ function sqlValue(value) {
   if (typeof value === "number") return Number.isFinite(value) ? String(Math.trunc(value)) : "0";
   if (value == null) return "NULL";
   return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function seedMonthLike(targetMonth) {
+  return `%seed:${assertValidMonth(targetMonth)}%`;
+}
+
+function assertValidBatchId(value) {
+  const batch = String(value || "");
+  if (!/^batch-\d{3}(?:-retry-\d+)?$/.test(batch)) throw new Error(`Invalid batch-id: ${batch}`);
+  return batch;
+}
+
+async function writeImportJournal(update) {
+  await ensureDir(liveRunsDir);
+  let current = {};
+  try {
+    current = JSON.parse(await fsp.readFile(journalPath, "utf8"));
+  } catch {}
+  const next = {
+    ...current,
+    ...update,
+    updatedAt: new Date().toISOString(),
+  };
+  await writePrivateFile(journalPath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+async function appendFileDurably(file, data) {
+  await ensureDir(path.dirname(file));
+  const handle = await fsp.open(file, "a", 0o600);
+  try {
+    await handle.writeFile(data, "utf8");
+    await handle.datasync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writePrivateFile(file, data) {
+  await ensureDir(path.dirname(file));
+  await fsp.writeFile(file, data, { encoding: "utf8", mode: 0o600 });
+  await fsp.chmod(file, 0o600);
 }
 
 function formatLocalDate(d) {

@@ -37,6 +37,7 @@ for (const meta of files) {
         rejectedCount: 0,
         dirtyCount: 0,
         dirtyRatio: 0,
+        rejectedRatio: 0,
         firstTs: null,
         lastTs: null,
         sampleUserText: null,
@@ -64,7 +65,8 @@ for (const meta of files) {
 }
 
 for (const row of byKey.values()) {
-  row.dirtyRatio = row.messageCount ? Number((row.rejectedCount / row.messageCount).toFixed(4)) : 0;
+  row.dirtyRatio = row.messageCount ? Number((row.dirtyCount / row.messageCount).toFixed(4)) : 0;
+  row.rejectedRatio = row.messageCount ? Number((row.rejectedCount / row.messageCount).toFixed(4)) : 0;
 }
 
 const rows = [...byKey.values()].sort((a, b) =>

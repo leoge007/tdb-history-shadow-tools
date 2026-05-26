@@ -1,13 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fsp from "node:fs/promises";
+import path from "node:path";
 import {
+  TMP_ROOT,
   assertNotLiveTdbOutput,
+  assertValidMonth,
   buildStrictRounds,
   classifySystemNoise,
   createContentDedupeContext,
+  ensureDir,
   extractMessage,
+  loadCleanMessages,
   parseConversationContent,
   rejectReason,
+  writeJson,
 } from "../src/tdb-history-lib.mjs";
 
 test("parseConversationContent extracts trusted Discord body and strips envelopes", () => {
@@ -65,6 +72,43 @@ test("content dedupe context rejects repeated normalized content in same source"
   const ctx = createContentDedupeContext();
   assert.equal(ctx.batchSeen.size, 0);
   assert.equal(ctx.sourceSeen.size, 0);
+});
+
+test("batch duplicate content is warned by default instead of dropped", async () => {
+  const dir = path.join(TMP_ROOT, "tests", `dedupe-${Date.now()}`);
+  await ensureDir(dir);
+  const first = path.join(dir, "first.jsonl");
+  const second = path.join(dir, "second.jsonl");
+  const record = JSON.stringify({
+    message: { role: "user", content: "Repeatable but valid user text" },
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  await fsp.writeFile(first, `${record}\n`, "utf8");
+  await fsp.writeFile(second, `${record}\n`, "utf8");
+
+  const rejects = [];
+  const ctx = createContentDedupeContext();
+  const firstMessages = await loadCleanMessages(first, { sourceType: "agent:a", sessionKey: "agent:a:s1", sessionId: "s1" }, "2026-01", (r) => rejects.push(r), ctx);
+  const secondMessages = await loadCleanMessages(second, { sourceType: "agent:b", sessionKey: "agent:b:s2", sessionId: "s2" }, "2026-01", (r) => rejects.push(r), ctx);
+
+  assert.equal(firstMessages.length, 1);
+  assert.equal(secondMessages.length, 1);
+  assert.equal(rejects.some((r) => r.reason === "duplicate_normalized_content_warning" && r.duplicateScope === "batch"), true);
+});
+
+test("writeJson creates and repairs private file permissions", async () => {
+  const dir = path.join(TMP_ROOT, "tests", `perms-${Date.now()}`);
+  await ensureDir(dir);
+  const file = path.join(dir, "private.json");
+  await fsp.writeFile(file, "{}\n", { mode: 0o644 });
+  await fsp.chmod(file, 0o644);
+  await writeJson(file, { secret: true });
+  assert.equal((await fsp.stat(file)).mode & 0o777, 0o600);
+});
+
+test("assertValidMonth rejects non-month strings", () => {
+  assert.equal(assertValidMonth("2026-04"), "2026-04");
+  assert.throws(() => assertValidMonth("2026-04' or 1=1 --"), /Invalid month/);
 });
 
 test("assertNotLiveTdbOutput refuses live memory directory", () => {

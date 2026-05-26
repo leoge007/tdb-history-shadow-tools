@@ -82,7 +82,8 @@ const md = renderReport({
   liveCheck,
   warningSummary,
 });
-await fsp.writeFile(reportPath, md, "utf8");
+await fsp.writeFile(reportPath, md, { encoding: "utf8", mode: 0o600 });
+await fsp.chmod(reportPath, 0o600);
 console.log(JSON.stringify({ output: reportPath, inputStats, inputQuality, inputOverlap, outputCounts, outputQuality, l1Types: typeDistribution, l1LengthStats, suspicious: suspicious.length, warningSummary, liveCheck }, null, 2));
 
 function summarizeInput(inputJson) {

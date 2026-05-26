@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   INPUTS_DIR,
   INVENTORY_PATH,
+  assertValidMonth,
   buildStrictRounds,
   createContentDedupeContext,
   ensureDir,
@@ -18,7 +19,7 @@ import {
 
 const args = parseArgs(process.argv.slice(2));
 const inventoryPath = expandHome(args.inventory || INVENTORY_PATH);
-const month = args.month;
+const month = args.month ? assertValidMonth(args.month) : "";
 const batchId = String(args["batch-id"] || "batch-001");
 const batchSize = args["batch-size"] ? Number(args["batch-size"]) : null;
 const batchIndex = args["batch-index"] ? Number(args["batch-index"]) : null;
@@ -78,6 +79,7 @@ const writeReject = (record) => rejectStream.write(`${JSON.stringify(record)}\n`
 
 const allRounds = [];
 const contentDedupe = createContentDedupeContext();
+contentDedupe.rejectBatchDuplicates = Boolean(args["reject-batch-duplicates"]);
 
 for (const row of rows) {
   const file = expandHome(row.file);
@@ -137,6 +139,7 @@ const metadata = {
     sessionKey: args.sessionKey || null,
     batchSize,
     batchIndex,
+    rejectBatchDuplicates: contentDedupe.rejectBatchDuplicates,
   },
 };
 

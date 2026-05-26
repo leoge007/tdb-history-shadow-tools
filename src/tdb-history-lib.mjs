@@ -51,6 +51,12 @@ export function parseArgs(argv) {
   return args;
 }
 
+export function assertValidMonth(month, label = "month") {
+  const value = String(month || "");
+  if (!/^\d{4}-\d{2}$/.test(value)) throw new Error(`Invalid ${label}: ${value}`);
+  return value;
+}
+
 export async function ensureDir(dir) {
   await fsp.mkdir(dir, { recursive: true });
 }
@@ -415,6 +421,7 @@ export function createContentDedupeContext() {
   return {
     batchSeen: new Map(),
     sourceSeen: new Map(),
+    rejectBatchDuplicates: false,
   };
 }
 
@@ -454,11 +461,11 @@ export async function loadCleanMessages(file, meta, month, rejectWriter, dedupeC
       }
       const existingBatch = dedupeContext.batchSeen.get(roleHash);
       if (existingBatch) {
-        rejectWriter?.(rejectRecord("duplicate_normalized_content", file, meta, lineNo, msg, {
+        rejectWriter?.(rejectRecord("duplicate_normalized_content_warning", file, meta, lineNo, msg, {
           duplicateScope: "batch",
           duplicateOf: existingBatch,
         }));
-        return;
+        if (dedupeContext.rejectBatchDuplicates) return;
       }
       const marker = {
         file: relativeToHome(file),
@@ -773,6 +780,8 @@ export async function readJson(file) {
 export async function writeJson(file, data, mode) {
   const resolved = assertWritableTarget(file);
   await ensureDir(path.dirname(resolved));
-  await fsp.writeFile(resolved, `${JSON.stringify(data, null, 2)}\n`, mode ? { mode } : undefined);
+  const finalMode = mode ?? 0o600;
+  await fsp.writeFile(resolved, `${JSON.stringify(data, null, 2)}\n`, { mode: finalMode });
+  await fsp.chmod(resolved, finalMode);
   return resolved;
 }
