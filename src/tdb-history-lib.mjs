@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createInterface } from "node:readline";
 
 export const WORKSPACE_ROOT = path.resolve(expandHome(process.env.TDB_HISTORY_WORKSPACE || process.cwd()));
 export const STATE_ROOT = path.resolve(expandHome(process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), ".openclaw")));
@@ -162,15 +163,18 @@ export function sourceMeta(file) {
 }
 
 export async function readJsonl(file, onObject) {
-  const text = await fsp.readFile(file, "utf8");
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+  const resolved = expandHome(file);
+  const stream = fs.createReadStream(resolved, { encoding: "utf8", highWaterMark: 64 * 1024 });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  let lineNo = 0;
+  for await (const rawLine of rl) {
+    lineNo++;
+    const line = rawLine.trim();
     if (!line) continue;
     try {
-      await onObject(JSON.parse(line), i + 1, line);
+      await onObject(JSON.parse(line), lineNo, line);
     } catch (err) {
-      await onObject(null, i + 1, line, err);
+      await onObject(null, lineNo, line, err);
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "tdb-history-shadow-tools",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "type": "module",
   "description": "Lightweight tools for preparing and L0-importing historical TencentDB Agent Memory inputs.",

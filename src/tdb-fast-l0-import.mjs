@@ -28,9 +28,14 @@ const inputPath = path.join(INPUTS_DIR, `${month}-${batchId}.json`);
 const liveDir = path.resolve(expandHome(args["live-dir"] || LIVE_TDB_DIR));
 const dbPath = path.join(liveDir, "vectors.db");
 const manifestPath = path.join(TMP_ROOT, "live-runs", `${month}-accepted-batches.json`);
+const OFFLOAD_DIR = path.join(TMP_ROOT, "offload");
+const MMDS_DIR = path.join(TMP_ROOT, "mmds");
+const IMPORT_INDEX_PATH = path.join(TMP_ROOT, "import-index.json");
 const dryRunPath = path.join(AUDITS_DIR, `${month}-${batchId}-fast-l0-dry-run.md`);
 const importReportPath = path.join(AUDITS_DIR, `${month}-${batchId}-l0-import-report.md`);
 const liveRunsDir = path.join(TMP_ROOT, "live-runs", `${month}-${batchId}-fast-l0-import`);
+const summaryPath = path.join(OFFLOAD_DIR, `${month}-${batchId}.import-summary.jsonl`);
+const mmdPath = path.join(MMDS_DIR, `${month}.mmd`);
 const EXECUTE_BATCHES_BY_MONTH = new Map([
   ["2026-02", new Set(Array.from({ length: 6 }, (_, i) => `batch-${String(i + 1).padStart(3, "0")}`))],
   ["2026-03", new Set(Array.from({ length: 12 }, (_, i) => `batch-${String(i + 1).padStart(3, "0")}`))],
@@ -53,6 +58,8 @@ const acceptedAligned = acceptedManifest
 const estimated = estimateRuntime(capture.expectedCount);
 
 await ensureDir(AUDITS_DIR);
+await ensureDir(OFFLOAD_DIR);
+await ensureDir(MMDS_DIR);
 if (acceptExisting) {
   const result = await acceptExistingImport();
   console.log(JSON.stringify(result, null, 2));
@@ -60,9 +67,16 @@ if (acceptExisting) {
   const result = await executeImport();
   console.log(JSON.stringify(result, null, 2));
 } else {
+  const dryRows = buildPlannedRows();
+  await writeImportSummary(dryRows, null, "dry-run");
+  await updateMmdCanvas(dryRows, null, "dry-run", dryRunPath, summaryPath);
+  await updateImportIndex(null, "dry-run", summaryPath, dryRunPath);
   await fsp.writeFile(dryRunPath, renderDryRun(), "utf8");
   console.log(JSON.stringify({
     reportPath: relativeToHome(dryRunPath),
+    summaryPath: relativeToHome(summaryPath),
+    mmdPath: relativeToHome(mmdPath),
+    importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
     mode: "dry-run",
     month,
     batchId,
@@ -98,8 +112,22 @@ async function acceptExistingImport() {
     throw new Error(`STOP: existing import is not acceptable for ${month}-${batchId}: deltaL0=${actualDeltaL0}, deltaFts=${actualDeltaFts}, missing=${missingKeys.length}, duplicateExisting=${duplicateExisting}`);
   }
   await updateAcceptedManifest(after.l0);
+  const acceptedRows = buildPlannedRows();
+  const acceptedResult = {
+    beforeL0: baselineL0,
+    afterL0: after.l0,
+    expectedDeltaL0: capture.expectedCount,
+    actualDeltaL0,
+    actualDeltaFts,
+  };
+  await writeImportSummary(acceptedRows, acceptedResult, "accept-existing");
+  await updateMmdCanvas(acceptedRows, acceptedResult, "accept-existing", importReportPath, summaryPath);
+  await updateImportIndex(acceptedResult, "accept-existing", summaryPath, importReportPath);
   const result = {
     reportPath: relativeToHome(importReportPath),
+    summaryPath: relativeToHome(summaryPath),
+    mmdPath: relativeToHome(mmdPath),
+    importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
     manifestPath: relativeToHome(manifestPath),
     mode: "accept-existing",
     decision: "OK",
@@ -137,8 +165,10 @@ async function executeImport() {
   const beforeDuplicateKeys = [...plannedKeys].filter((key) => beforeKeys.has(key));
   assertExecutePreflight(before, beforeDuplicateKeys);
 
-  const rows = buildPlannedRows(startedAtMs);
+  const rows = buildPlannedRows();
   await ensureDir(liveRunsDir);
+  await ensureDir(OFFLOAD_DIR);
+  await ensureDir(MMDS_DIR);
   const sqlPath = path.join(liveRunsDir, "insert-l0.sql");
   const jsonlPath = path.join(liveDir, "conversations", `${formatLocalDate(new Date())}.jsonl`);
   const sql = renderInsertSql(rows);
@@ -174,8 +204,22 @@ async function executeImport() {
     await updateAcceptedManifest(after.l0);
   }
 
+  const executeResultSummary = {
+    beforeL0: before.l0,
+    afterL0: after.l0,
+    expectedDeltaL0: capture.expectedCount,
+    actualDeltaL0,
+    actualDeltaFts,
+  };
+  await writeImportSummary(rows, executeResultSummary, "execute");
+  await updateMmdCanvas(rows, executeResultSummary, "execute", importReportPath, summaryPath);
+  await updateImportIndex(executeResultSummary, "execute", summaryPath, importReportPath);
+
   const result = {
     reportPath: relativeToHome(importReportPath),
+    summaryPath: relativeToHome(summaryPath),
+    mmdPath: relativeToHome(mmdPath),
+    importIndexPath: relativeToHome(IMPORT_INDEX_PATH),
     manifestPath: relativeToHome(manifestPath),
     mode: "execute",
     decision: ok ? "OK" : "STOP",
@@ -266,12 +310,19 @@ function estimateRuntime(rows) {
   return { metadataOnly: metadataSeconds, withOptionalL0Embeddings: withOptionalL0EmbeddingSeconds };
 }
 
-function buildPlannedRows(baseMs) {
-  const recordedAt = new Date(baseMs).toISOString();
+function stableRecordId(msg) {
+  const contentHash = msg.normalizedContentHash || crypto.createHash("sha256").update(msg.content || "").digest("hex").slice(0, 24);
+  const fingerprint = `${msg.sessionKey}|${msg.role}|${Number(msg.timestamp) || 0}|${contentHash}`;
+  const hash = crypto.createHash("sha256").update(fingerprint).digest("hex").slice(0, 12);
+  return `l0_${hash}`;
+}
+
+function buildPlannedRows() {
+  const recordedAt = new Date().toISOString();
   return capture.kept.map((msg, i) => {
-    const suffix = (msg.normalizedContentHash || crypto.createHash("sha256").update(msg.content).digest("hex")).slice(0, 6);
-    const recordId = `l0_${msg.sessionKey}_${baseMs + i}_${i}_${suffix}`;
-    const messageId = msg.sourceKey || `fast_l0_${baseMs}_${i}_${suffix}`;
+    const recordId = stableRecordId(msg);
+    const contentHash = msg.normalizedContentHash || crypto.createHash("sha256").update(msg.content || "").digest("hex").slice(0, 24);
+    const messageId = msg.sourceKey || `fast_l0_${i}_${contentHash.slice(0, 6)}`;
     return {
       recordId,
       sessionKey: msg.sessionKey,
@@ -281,6 +332,11 @@ function buildPlannedRows(baseMs) {
       recordedAt,
       timestamp: Number(msg.timestamp) || 0,
       ftsText: tokenizeForFts(msg.content),
+      contentHash,
+      chars: String(msg.content || "").length,
+      sourceKey: msg.sourceKey || null,
+      sourceFile: msg.file || null,
+      sourceLine: msg.lineNo || null,
       jsonlRecord: {
         sessionKey: msg.sessionKey,
         sessionId: msg.sessionId || "",
@@ -343,6 +399,135 @@ async function updateAcceptedManifest(afterL0) {
   if (existingIndex >= 0) manifest.batches[existingIndex] = entry;
   else manifest.batches.push(entry);
   await fsp.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+async function writeImportSummary(rows, resultSummary, mode) {
+  const lines = rows.map((row) => {
+    const entry = {
+      batchId,
+      recordId: row.recordId,
+      sessionKey: row.sessionKey,
+      role: row.role,
+      timestamp: row.timestamp,
+      contentHash: row.contentHash,
+      sessionId: row.sessionId || null,
+      chars: row.chars,
+      sourceKey: row.sourceKey || null,
+      sourceFile: row.sourceFile ? relativeToHome(row.sourceFile) : null,
+      sourceLine: row.sourceLine || null,
+    };
+    return JSON.stringify(entry);
+  });
+  await fsp.writeFile(summaryPath, `${lines.join("\n")}\n`, "utf8");
+}
+
+async function updateMmdCanvas(rows, resultSummary, mode, reportPath, sumPath) {
+  const updatedAt = new Date().toISOString();
+  const expectedL0 = capture.expectedCount;
+  const actualDeltaL0 = resultSummary?.actualDeltaL0 ?? null;
+  const status = mode === "dry-run" ? "PLANNED" : mode === "execute" ? (actualDeltaL0 === expectedL0 ? "OK" : "STOP") : "ACCEPTED";
+  const statusColor = status === "OK" || status === "ACCEPTED" ? "#2ecc71" : status === "PLANNED" ? "#f39c12" : "#e74c3c";
+
+  let mmdLines = [];
+  if (fs.existsSync(mmdPath)) {
+    const existing = await fsp.readFile(mmdPath, "utf8");
+    mmdLines = existing.split(/\r?\n/);
+  }
+
+  const batchLabel = `batch-${batchId.replace("batch-", "")}`;
+  const batchLine = `    ${batchLabel}("${batchLabel}\\n${status}\\nΔ=${actualDeltaL0 ?? '?'}\\nexp=${expectedL0}")`;
+  const styleLine = `    style ${batchLabel} fill:${statusColor},stroke:#333,color:#000`;
+
+  let batchFound = false;
+  for (let i = 0; i < mmdLines.length; i++) {
+    if (mmdLines[i].includes(`${batchLabel}(`)) {
+      mmdLines[i] = batchLine;
+      batchFound = true;
+    } else if (mmdLines[i].includes(`style ${batchLabel}`)) {
+      mmdLines[i] = styleLine;
+    }
+  }
+
+  const metaComment = `%% ${month} — updated ${updatedAt} — ${mode}`;
+  const metadataLines = [
+    metaComment,
+    `%% batch-${batchId.replace("batch-", "")}: status=${status} expectedL0=${expectedL0} actualDeltaL0=${actualDeltaL0 ?? 'n/a'} report=${relativeToHome(reportPath)} summary=${relativeToHome(sumPath)}`,
+  ];
+
+  const hasGraphDef = mmdLines.some((l) => l.includes("graph LR") || l.includes("graph TD") || l.includes("flowchart"));
+  if (!hasGraphDef) {
+    mmdLines = [
+      ...metadataLines,
+      `%% Mermaid batch canvas for ${month}`,
+      "```mermaid",
+      `graph TD`,
+      `    month_${month.replace("-", "_")}("${month}")`,
+      batchLine,
+      styleLine,
+      `    month_${month.replace("-", "_")} --> ${batchLabel}`,
+      "```",
+      "",
+    ];
+  } else if (!batchFound) {
+    const graphInsert = [
+      `    month_${month.replace("-", "_")} --> ${batchLabel}`,
+      batchLine,
+    ];
+    const lastCodeCloseIdx = mmdLines.map((l, idx) => l.trim() === "```" ? idx : -1).filter((i) => i >= 0).pop();
+    if (lastCodeCloseIdx >= 0) {
+      mmdLines.splice(lastCodeCloseIdx, 0, ...graphInsert);
+    } else {
+      mmdLines.push(...graphInsert);
+    }
+  }
+
+  const nonMetadataStart = mmdLines.findIndex((l) => !l.startsWith("%%"));
+  const existingMetaStart = mmdLines.slice(0, nonMetadataStart >= 0 ? nonMetadataStart : mmdLines.length).filter((l) => l.startsWith("%%"));
+  const mergedMeta = [...metadataLines];
+  for (const line of existingMetaStart) {
+    if (!mergedMeta.some((m) => m === line)) mergedMeta.push(line);
+  }
+
+  const body = nonMetadataStart >= 0 ? mmdLines.slice(nonMetadataStart) : mmdLines;
+  const final = [...mergedMeta, ...body];
+
+  await fsp.writeFile(mmdPath, final.join("\n"), "utf8");
+}
+
+async function updateImportIndex(resultSummary, mode, sumPath, reportPath) {
+  let index = { months: {} };
+  if (fs.existsSync(IMPORT_INDEX_PATH)) {
+    try {
+      index = JSON.parse(await fsp.readFile(IMPORT_INDEX_PATH, "utf8"));
+      index.months = index.months || {};
+    } catch {
+      index = { months: {} };
+    }
+  }
+
+  const m = index.months[month] || { batches: {} };
+  index.months[month] = m;
+  m.batches = m.batches || {};
+
+  const batchEntry = m.batches[batchId] || {};
+  const expectedL0 = capture.expectedCount;
+  m.batches[batchId] = {
+    ...batchEntry,
+    batchId,
+    mode,
+    expectedL0,
+    actualDeltaL0: resultSummary?.actualDeltaL0 ?? batchEntry.actualDeltaL0 ?? null,
+    actualDeltaFts: resultSummary?.actualDeltaFts ?? batchEntry.actualDeltaFts ?? null,
+    summaryPath: relativeToHome(sumPath),
+    mmdPath: relativeToHome(mmdPath),
+    reportPath: relativeToHome(reportPath),
+    updatedAt: new Date().toISOString(),
+    beforeL0: resultSummary?.beforeL0 ?? batchEntry.beforeL0 ?? null,
+    afterL0: resultSummary?.afterL0 ?? batchEntry.afterL0 ?? null,
+  };
+
+  index.updatedAt = new Date().toISOString();
+  await fsp.writeFile(IMPORT_INDEX_PATH, `${JSON.stringify(index, null, 2)}\n`, "utf8");
 }
 
 function renderImportReport(result, before, after, missingKeys) {

@@ -61,9 +61,9 @@ This toolchain addresses those risks with a conservative workflow:
 - keep generated private data out of Git
 
 
-## v0.3 L0-first Fast Import
+## v0.4 L0-first Fast Import + Externalized Import State
 
-The live backfill workflow is now intentionally L0-first:
+The live backfill workflow remains intentionally L0-first, and v0.4 adds lightweight externalized import state for faster resume/review:
 
 ```text
 prepare seed input -> import L0 rows -> verify L0 delta -> let TencentDB Agent Memory build L1/L2/L3 later
@@ -91,6 +91,14 @@ expected capture-equivalent L0 == after live L0 - before live L0
 ```
 
 If the baseline is misaligned or duplicate rows already exist, it stops before writing.
+
+v0.4 also emits non-live sidecar artifacts for every dry-run / execute / accept-existing path:
+
+- `tmp/tdb-history/offload/<month>-<batchId>.import-summary.jsonl` — per-row import summary with stable record IDs and hashes.
+- `tmp/tdb-history/mmds/<month>.mmd` — Mermaid batch canvas for month-level progress/state review.
+- `tmp/tdb-history/import-index.json` — compact month/batch index for O(1) status lookup.
+
+These artifacts are operational state only. They do not modify live TencentDB Agent Memory L1/L2/L3/persona records and do not replace live SQLite guardrails.
 
 ## Product Target
 
