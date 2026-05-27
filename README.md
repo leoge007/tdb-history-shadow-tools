@@ -124,7 +124,7 @@ For each tracked month, the dashboard displays:
 - **Session list** — ✅ done / 🔄 running / ⬜ queued with offset details
 - **▶ Resume Next Batch button** — triggers the next batch without typing a command
 
-The page auto-refreshes every 30 seconds.
+The page auto-refreshes every 120 seconds.
 
 ### Resuming a batch
 
@@ -742,7 +742,7 @@ python3 scripts/tdb-l1-dashboard.py
 - **Session 列表** — ✅ 完成 / 🔄 处理中 / ⬜ 排队，含 offset 明细
 - **▶ Resume Next Batch 按钮** — 点一下触发下一批，不需要敲命令
 
-页面每 30 秒自动刷新。
+页面每 120 秒自动刷新。
 
 ### 恢复中断的批次
 

@@ -191,7 +191,7 @@ def render_html(state):
         html += '</div>'
     html += """
 <div class="footer">
-  Auto-refreshes every 30s &nbsp;|&nbsp;
+  Auto-refreshes every 120s &nbsp;|&nbsp;
   <a href="/" style="color:#58a6ff;text-decoration:none">Refresh now</a>
 </div>
 <script>
@@ -214,7 +214,7 @@ function updateTime() { document.querySelectorAll('span[id^="ts-"]').forEach(el 
 function autoReload() { location.reload(); }
 updateTime();
 setInterval(updateTime, 1000);
-setInterval(autoReload, 30000);
+setInterval(autoReload, 120000);
 </script>
 </body></html>"""
     return html
