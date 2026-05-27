@@ -74,6 +74,25 @@ button:disabled  { opacity: .4; cursor: default; }
 .msg-info  { background: #1c2a3a; color: #58a6ff; }
 .footer { margin-top: 28px; font-size: 11px; color: #484f58; }
 .l1-types { font-size: 11px; color: #8b949e; margin-top: 4px; }
+.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; max-width: 720px; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.alive {
+  background: #3fb950;
+  animation: breathe 2s ease-in-out infinite;
+}
+.status-dot.dead {
+  background: #f85149;
+}
+@keyframes breathe {
+  0%  { box-shadow: 0 0 0 0 rgba(63,185,80,.5); }
+  70% { box-shadow: 0 0 0 7px rgba(63,185,80,0); }
+  100%{ box-shadow: 0 0 0 0 rgba(63,185,80,0); }
+}
+.status-text { font-size: 12px; color: #8b949e; }
+.status-text.alive  { color: #3fb950; }
+.status-text.dead   { color: #f85149; }
 """
 
 
@@ -139,9 +158,16 @@ def get_state():
 
 
 def render_html(state):
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>TDB L1 Dashboard</title><style>{STYLE}</style></head>
-<body><h1>🔥 TDB L1 Catch-up Dashboard</h1>"""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>TDB L1 Dashboard</title><style>"""
+    html += STYLE
+    html += """</style></head>
+<body>
+<div class="status-row">
+  <span class="status-dot alive" id="sd"></span>
+  <span class="status-text alive" id="st">Dashboard alive</span>
+</div>
+<h1>🔥 TDB L1 Catch-up Dashboard</h1>"""
     for month, m in state.items():
         done = m["completed"]; running = m["running"]
         total = done + running + m["queued"]
@@ -197,24 +223,49 @@ def render_html(state):
 <script>
 function showMsg(id, text, type) {
   document.getElementById(id).innerHTML = '<div class="msg msg-' + type + '">' + text + '</div>';
-  if (type !== 'error') setTimeout(() => location.reload(), 2500);
+  if (type !== 'error') setTimeout(function(){ location.reload(); }, 2500);
 }
 async function resume(month) {
-  const btn = document.getElementById('btn-' + month);
+  var btn = document.getElementById('btn-' + month);
   btn.disabled = true; btn.textContent = '⏳ Starting...';
   try {
-    const r = await fetch('/resume?month=' + encodeURIComponent(month), {method:'POST'});
-    const t = await r.text();
+    var r = await fetch('/resume?month=' + encodeURIComponent(month), {method:'POST'});
+    var t = await r.text();
     if (r.ok) { showMsg('msg-'+month, '✅ Triggered — watch terminal/log', 'ok'); }
     else       { showMsg('msg-'+month, '❌ ' + t, 'error'); btn.disabled = false; }
   } catch(e) { showMsg('msg-'+month, '❌ ' + e.message, 'error'); btn.disabled = false; }
 }
-async function load() { location.reload(); }
-function updateTime() { document.querySelectorAll('span[id^="ts-"]').forEach(el => { el.textContent = new Date().toLocaleTimeString(); }); }
+function updateTime() {
+  document.querySelectorAll('span[id^="ts-"]').forEach(function(el) {
+    el.textContent = new Date().toLocaleTimeString();
+  });
+}
 function autoReload() { location.reload(); }
 updateTime();
 setInterval(updateTime, 1000);
 setInterval(autoReload, 120000);
+
+// Heartbeat poll — 5s interval
+async function ping() {
+  try {
+    var r = await fetch('/health', {method:'GET', cache:'no-cache'});
+    if (r.ok) {
+      document.getElementById('sd').className = 'status-dot alive';
+      document.getElementById('st').className = 'status-text alive';
+      document.getElementById('st').textContent = 'Dashboard alive';
+    } else {
+      document.getElementById('sd').className = 'status-dot dead';
+      document.getElementById('st').className = 'status-text dead';
+      document.getElementById('st').textContent = 'Dashboard not responding (' + r.status + ')';
+    }
+  } catch(e) {
+    document.getElementById('sd').className = 'status-dot dead';
+    document.getElementById('st').className = 'status-text dead';
+    document.getElementById('st').textContent = 'Dashboard offline';
+  }
+}
+setInterval(ping, 5000);
+ping();
 </script>
 </body></html>"""
     return html
@@ -235,6 +286,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.dumps({"months": state}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/health":
+            body = b"OK"
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
