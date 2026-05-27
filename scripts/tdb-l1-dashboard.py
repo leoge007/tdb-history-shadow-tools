@@ -29,7 +29,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
      color: #8b949e; margin: 20px 0 10px; }
 .month-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
               padding: 16px; margin-bottom: 16px; max-width: 720px; }
-.month-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.month-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .month-name { font-size: 16px; font-weight: 600; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
 .badge-done    { background: #238636; color: #fff; }
@@ -74,25 +74,18 @@ button:disabled  { opacity: .4; cursor: default; }
 .msg-info  { background: #1c2a3a; color: #58a6ff; }
 .footer { margin-top: 28px; font-size: 11px; color: #484f58; }
 .l1-types { font-size: 11px; color: #8b949e; margin-top: 4px; }
-.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; max-width: 720px; }
-.status-dot {
-  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
-.status-dot.alive {
-  background: #3fb950;
-  animation: breathe 2s ease-in-out infinite;
-}
-.status-dot.dead {
-  background: #f85149;
-}
+.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; max-width: 720px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.alive  { background: #3fb950; animation: breathe 2s ease-in-out infinite; }
+.status-dot.dead   { background: #f85149; }
 @keyframes breathe {
   0%  { box-shadow: 0 0 0 0 rgba(63,185,80,.5); }
-  70% { box-shadow: 0 0 0 7px rgba(63,185,80,0); }
+  70% { box-shadow: 0 0 0 6px rgba(63,185,80,0); }
   100%{ box-shadow: 0 0 0 0 rgba(63,185,80,0); }
 }
-.status-text { font-size: 12px; color: #8b949e; }
-.status-text.alive  { color: #3fb950; }
-.status-text.dead   { color: #f85149; }
+.status-text { font-size: 11px; color: #6e7681; }
+.card-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.card-dot.running { background: #3fb950; animation: breathe 2s ease-in-out infinite; }
 """
 
 
@@ -165,7 +158,7 @@ def render_html(state):
 <body>
 <div class="status-row">
   <span class="status-dot alive" id="sd"></span>
-  <span class="status-text alive" id="st">Dashboard alive</span>
+  <span class="status-text" id="st">Dashboard</span>
 </div>
 <h1>🔥 TDB L1 Catch-up Dashboard</h1>"""
     for month, m in state.items():
@@ -177,9 +170,11 @@ def render_html(state):
         badge_txt = "Done" if running == 0 and done == total and total > 0 \
             else ("Running" if running > 0 else ("Queued" if m["remaining"] > 0 else "Idle"))
         types_str = "  ".join(f"{k}:{v}" for k, v in sorted(m["types"].items()))
+        live_dot = '<span class="card-dot running"></span>' if running > 0 else ''
         html += f"""
 <div class="month-card">
   <div class="month-header">
+    {live_dot}
     <span class="month-name">{month}</span>
     <span class="badge {badge_cls}">{badge_txt}</span>
     <span style="margin-left:auto;font-size:12px;color:#6e7681">
@@ -251,17 +246,15 @@ async function ping() {
     var r = await fetch('/health', {method:'GET', cache:'no-cache'});
     if (r.ok) {
       document.getElementById('sd').className = 'status-dot alive';
-      document.getElementById('st').className = 'status-text alive';
-      document.getElementById('st').textContent = 'Dashboard alive';
     } else {
       document.getElementById('sd').className = 'status-dot dead';
-      document.getElementById('st').className = 'status-text dead';
-      document.getElementById('st').textContent = 'Dashboard not responding (' + r.status + ')';
+      document.getElementById('st').textContent = 'offline';
+      document.getElementById('st').style.color = '#f85149';
     }
   } catch(e) {
     document.getElementById('sd').className = 'status-dot dead';
-    document.getElementById('st').className = 'status-text dead';
-    document.getElementById('st').textContent = 'Dashboard offline';
+    document.getElementById('st').textContent = 'offline';
+    document.getElementById('st').style.color = '#f85149';
   }
 }
 setInterval(ping, 5000);
