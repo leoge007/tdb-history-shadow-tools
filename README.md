@@ -100,6 +100,60 @@ v0.4 also emits non-live sidecar artifacts for every dry-run / execute / accept-
 
 These artifacts are operational state only. They do not modify live TencentDB Agent Memory L1/L2/L3/persona records and do not replace live SQLite guardrails.
 
+## L1 Catch-up Dashboard
+
+For ongoing L1 catch-up runs over large existing L0 bases (e.g. thousands of sessions across multiple months), the `tdb-l1-dashboard.py` script provides a local web UI so you can monitor progress and resume interrupted batches without relying on terminal output.
+
+### Starting the dashboard
+
+```bash
+python3 scripts/tdb-l1-dashboard.py
+# → TDB L1 Dashboard → http://localhost:7842
+```
+
+No npm dependencies required. Requires only Python 3 and a readable `vectors.db`.
+
+### What it shows
+
+For each tracked month, the dashboard displays:
+
+- **Sessions Done / In Progress / Remaining** — per-month session completion breakdown
+- **L1 / FTS / Vec counts** — live from the database
+- **L1 type distribution** — episodic / instruction / persona breakdown
+- **Progress bar** — percentage of completed sessions
+- **Session list** — ✅ done / 🔄 running / ⬜ queued with offset details
+- **▶ Resume Next Batch button** — triggers the next batch without typing a command
+
+The page auto-refreshes every 30 seconds.
+
+### Resuming a batch
+
+If a run is interrupted, open the dashboard and click **▶ Resume Next Batch** for that month. The button fires the same batch parameters that were in use (max-sessions=20, max-chunks=20, chunk-size=20, bg-size=5, --apply) and the runner resumes from its checkpoint (recorded in `<month>-progress.json`).
+
+```bash
+# Manual equivalent of the Resume button:
+node --import ~/.openclaw/npm/node_modules/tsx/dist/loader.mjs \
+  scripts/tdb-history/tdb-l1-catchup-existing-l0.mjs \
+  --month 2026-04 \
+  --max-sessions 20 --max-chunks 20 --chunk-size 20 --bg-size 5 \
+  --apply
+```
+
+### Environment variables
+
+The dashboard reads the same environment variables as the other tools:
+
+```bash
+# Default paths (override if your workspace differs)
+export OPENCLAW_STATE_DIR="$HOME/.openclaw"
+export TDB_HISTORY_WORKSPACE="$PWD"
+export TDB_HISTORY_TMP="$PWD/tmp/tdb-history"
+
+python3 scripts/tdb-l1-dashboard.py
+```
+
+The dashboard is **read-only** against the database and progress files. It does not modify any records.
+
 ## Product Target
 
 Primary target:
@@ -663,6 +717,61 @@ node src/tdb-live-verify.mjs --month 2026-04
 - live L1 是否出现同月记录
 - L1 FTS 是否覆盖同月 L1
 - L1 embedding 缺失率是否可接受
+
+## L1 回填可视化看板
+
+在跑 L1 catch-up 时（已有大量 L0 待抽取），`tdb-l1-dashboard.py` 提供一个本地 Web 页面来监控进度和恢复中断的批次。
+
+### 启动看板
+
+```bash
+python3 scripts/tdb-l1-dashboard.py
+# → TDB L1 Dashboard → http://localhost:7842
+```
+
+无需 npm 依赖，只依赖 Python 3 和可读的 `vectors.db`。
+
+### 看板内容
+
+每个月份显示：
+
+- **Sessions Done / In Progress / Remaining** — 该月 session 完成情况
+- **L1 / FTS / Vec 计数** — 实时从数据库读
+- **L1 类型分布** — episodic / instruction / persona
+- **进度条** — 已完成 session 百分比
+- **Session 列表** — ✅ 完成 / 🔄 处理中 / ⬜ 排队，含 offset 明细
+- **▶ Resume Next Batch 按钮** — 点一下触发下一批，不需要敲命令
+
+页面每 30 秒自动刷新。
+
+### 恢复中断的批次
+
+运行中断后，打开看板，点对应月份的 **▶ Resume Next Batch** 即可继续。
+
+runner 会从 checkpoint（`<month>-progress.json`）自动恢复，不需要重新跑整批。
+
+```bash
+# 手动等效命令（看板按钮背后就是这个）：
+node --import ~/.openclaw/npm/node_modules/tsx/dist/loader.mjs \
+  scripts/tdb-history/tdb-l1-catchup-existing-l0.mjs \
+  --month 2026-04 \
+  --max-sessions 20 --max-chunks 20 --chunk-size 20 --bg-size 5 \
+  --apply
+```
+
+### 环境变量
+
+看板读取与其他工具相同的环境变量：
+
+```bash
+export OPENCLAW_STATE_DIR="$HOME/.openclaw"
+export TDB_HISTORY_WORKSPACE="$PWD"
+export TDB_HISTORY_TMP="$PWD/tmp/tdb-history"
+
+python3 scripts/tdb-l1-dashboard.py
+```
+
+看板**只读**数据库和 progress 文件，不会写入任何记录。
 
 ## 停机线
 

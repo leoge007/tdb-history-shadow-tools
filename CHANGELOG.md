@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.5.0
+
+### New Tool
+
+- Added `scripts/tdb-l1-dashboard.py` — a local web dashboard for monitoring L1 catch-up progress across months. Displays session completion status, L1/FTS/Vec counts, type distribution, and a live progress bar. Includes a **Resume Next Batch** button that triggers the next catch-up batch without typing a command. Auto-refreshes every 30 seconds. Python-only, no npm dependencies.
 
 ### Security and Safety
 
