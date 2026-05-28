@@ -113,22 +113,18 @@ def get_state():
             try:
                 con = sqlite3.connect(str(DB_PATH))
                 cur = con.cursor()
-                for col, var in [("count(*)", "l1"),
-                                 ("count(*)", "fts"),
-                                 ("count(*)", "vec")]:
-                    if var == "fts":
-                        cur.execute(
-                            "SELECT COUNT(*) FROM l1_records r JOIN l1_fts f ON f.record_id=r.record_id "
-                            "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
-                    elif var == "vec":
-                        cur.execute(
-                            "SELECT COUNT(*) FROM l1_records r JOIN l1_vec_rowids v ON v.id=r.record_id "
-                            "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
-                    else:
-                        cur.execute(
-                            "SELECT COUNT(*) FROM l1_records WHERE session_key LIKE ?",
-                            (f"%seed:{month}%",))
-                    locals()[var] = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT COUNT(*) FROM l1_records WHERE session_key LIKE ?",
+                    (f"%seed:{month}%",))
+                l1 = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT COUNT(*) FROM l1_records r JOIN l1_fts f ON f.record_id=r.record_id "
+                    "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
+                fts = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT COUNT(*) FROM l1_records r JOIN l1_vec_rowids v ON v.id=r.record_id "
+                    "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
+                vec = cur.fetchone()[0]
                 cur.execute(
                     "SELECT type, COUNT(*) FROM l1_records WHERE session_key LIKE ? GROUP BY type",
                     (f"%seed:{month}%",))
