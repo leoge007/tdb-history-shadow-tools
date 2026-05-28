@@ -29,6 +29,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
      color: #8b949e; margin: 20px 0 10px; }
 .month-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
               padding: 16px; margin-bottom: 16px; max-width: 720px; }
+.summary-card { background: #0f1720; border: 1px solid #1f6feb; box-shadow: 0 0 0 1px rgba(31,111,235,.15);
+                border-radius: 8px; padding: 16px; margin-bottom: 16px; max-width: 720px; }
+.summary-title { font-size: 13px; color: #58a6ff; font-weight: 700; margin-bottom: 10px; }
 .month-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .month-name { font-size: 16px; font-weight: 600; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
@@ -156,6 +159,10 @@ def get_state():
         completed = sum(1 for s in sessions if s["done"])
         running   = sum(1 for s in sessions if s["running"])
         queued    = len(sessions) - completed - running
+        rows_done = sum(s["offset"] for s in sessions)
+        rows_total = sum(s["total"] for s in sessions)
+        rows_remaining = max(0, rows_total - rows_done)
+        row_pct = round(rows_done / rows_total * 100) if rows_total else 0
         sessions.sort(key=lambda x: (x["done"], x["offset"] == 0, -(x["offset"] or 0), -(x["total"] or 0)))
         months[month] = {
             "sessions": sessions,
@@ -163,6 +170,8 @@ def get_state():
             "l1": l1, "fts": fts, "vec": vec,
             "completed": completed, "running": running, "queued": queued,
             "remaining": max(0, len(sessions) - completed - running),
+            "rows_done": rows_done, "rows_total": rows_total,
+            "rows_remaining": rows_remaining, "row_pct": row_pct,
             "types": types,
         }
     return months
@@ -179,10 +188,33 @@ def render_html(state):
   <span class="status-text" id="st">Dashboard</span>
 </div>
 <h1>🔥 TDB L1 Catch-up Dashboard</h1>"""
+    total_sessions = sum(len(m["sessions"]) for m in state.values())
+    done_sessions = sum(m["completed"] for m in state.values())
+    running_sessions = sum(m["running"] for m in state.values())
+    remaining_sessions = max(0, total_sessions - done_sessions - running_sessions)
+    rows_done = sum(m.get("rows_done", 0) for m in state.values())
+    rows_total = sum(m.get("rows_total", 0) for m in state.values())
+    rows_remaining = max(0, rows_total - rows_done)
+    overall_pct = round(rows_done / rows_total * 100) if rows_total else 0
+    total_l1 = sum(m["l1"] for m in state.values())
+    html += f"""
+<div class="summary-card">
+  <div class="summary-title">Overall Import Countdown</div>
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Rows Done</div><div class="stat-value green">{rows_done:,}</div></div>
+    <div class="stat"><div class="stat-label">Rows Remaining</div><div class="stat-value">{rows_remaining:,}</div></div>
+    <div class="stat"><div class="stat-label">Total Rows</div><div class="stat-value">{rows_total:,}</div></div>
+    <div class="stat"><div class="stat-label">Sessions Done</div><div class="stat-value green">{done_sessions}/{total_sessions}</div></div>
+    <div class="stat"><div class="stat-label">Running</div><div class="stat-value blue">{running_sessions}</div></div>
+    <div class="stat"><div class="stat-label">L1 Stored</div><div class="stat-value">{total_l1:,}</div></div>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" style="width:{overall_pct}%"></div></div>
+  <div class="l1-types">{overall_pct}% complete by L0 rows · {remaining_sessions} sessions remaining</div>
+</div>"""
     for month, m in state.items():
         done = m["completed"]; running = m["running"]
         total = done + running + m["queued"]
-        pct = round(done / total * 100) if total else 0
+        pct = m.get("row_pct") or (round(done / total * 100) if total else 0)
         badge_cls = "badge-done" if running == 0 and done == total and total > 0 \
             else ("badge-running" if running > 0 else "badge-idle")
         badge_txt = "Done" if running == 0 and done == total and total > 0 \
@@ -196,15 +228,17 @@ def render_html(state):
     <span class="month-name">{month}</span>
     <span class="badge {badge_cls}">{badge_txt}</span>
     <span style="margin-left:auto;font-size:12px;color:#6e7681">
-      {done}/{total} sessions &nbsp;|&nbsp; {pct}% &nbsp;|&nbsp; L0={m['l0']} &nbsp;|&nbsp; L1={m['l1']} &nbsp;|&nbsp; <span id="ts-{month}"></span>
+      {done}/{total} sessions &nbsp;|&nbsp; {pct}% rows &nbsp;|&nbsp; left={m['rows_remaining']:,} &nbsp;|&nbsp; L0={m['l0']:,} &nbsp;|&nbsp; L1={m['l1']:,} &nbsp;|&nbsp; <span id="ts-{month}"></span>
     </span>
   </div>
   <div class="stats">
     <div class="stat"><div class="stat-label">Sessions Done</div><div class="stat-value green">{done}</div></div>
     <div class="stat"><div class="stat-label">In Progress</div><div class="stat-value blue">{running}</div></div>
-    <div class="stat"><div class="stat-label">Remaining</div><div class="stat-value">{m['remaining']}</div></div>
-    <div class="stat"><div class="stat-label">L0 Rows</div><div class="stat-value">{m['l0']}</div></div>
-    <div class="stat"><div class="stat-label">L1 Stored</div><div class="stat-value">{m['l1']}</div></div>
+    <div class="stat"><div class="stat-label">Sessions Left</div><div class="stat-value">{m['remaining']}</div></div>
+    <div class="stat"><div class="stat-label">Rows Done</div><div class="stat-value green">{m['rows_done']:,}</div></div>
+    <div class="stat"><div class="stat-label">Rows Left</div><div class="stat-value">{m['rows_remaining']:,}</div></div>
+    <div class="stat"><div class="stat-label">L0 Rows</div><div class="stat-value">{m['l0']:,}</div></div>
+    <div class="stat"><div class="stat-label">L1 Stored</div><div class="stat-value">{m['l1']:,}</div></div>
     <div class="stat"><div class="stat-label">L1 FTS</div><div class="stat-value green">{m['fts']}</div></div>
     <div class="stat"><div class="stat-label">L1 Vec</div><div class="stat-value green">{m['vec']}</div></div>
   </div>
