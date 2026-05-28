@@ -93,26 +93,35 @@ def get_state():
     months = {}
     for month in MONTHS:
         pf = PROGRESS_DIR / f"{month}-progress.json"
-        sessions = []
+        progress_sessions = {}
+        db_sessions = {}
+        l0 = l0_fts = l0_vec = 0
         l1 = fts = vec = 0
         types = {}
         if pf.exists():
             try:
                 d = json.loads(pf.read_text())
-                for k, v in d.get("sessions", {}).items():
-                    offset = v.get("nextOffset", 0)
-                    total = v.get("totalL0", 0) or 0
-                    done = bool(v.get("completed"))
-                    sessions.append({
-                        "key": k, "offset": offset, "total": total,
-                        "done": done, "running": not done and offset > 0
-                    })
+                progress_sessions = d.get("sessions", {}) or {}
             except Exception:
                 pass
         if DB_PATH.exists():
             try:
                 con = sqlite3.connect(str(DB_PATH))
                 cur = con.cursor()
+                cur.execute(
+                    "SELECT session_key, COUNT(*) FROM l0_conversations "
+                    "WHERE session_key LIKE ? GROUP BY session_key",
+                    (f"%seed:{month}%",))
+                db_sessions = dict(cur.fetchall())
+                l0 = sum(db_sessions.values())
+                cur.execute(
+                    "SELECT COUNT(*) FROM l0_conversations r JOIN l0_fts f ON f.record_id=r.record_id "
+                    "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
+                l0_fts = cur.fetchone()[0]
+                cur.execute(
+                    "SELECT COUNT(*) FROM l0_vec_rowids v JOIN l0_conversations r ON r.record_id=v.id "
+                    "WHERE r.session_key LIKE ?", (f"%seed:{month}%",))
+                l0_vec = cur.fetchone()[0]
                 cur.execute(
                     "SELECT COUNT(*) FROM l1_records WHERE session_key LIKE ?",
                     (f"%seed:{month}%",))
@@ -132,12 +141,25 @@ def get_state():
                 con.close()
             except Exception:
                 pass
+        sessions = []
+        for k in sorted(set(db_sessions) | set(progress_sessions)):
+            p = progress_sessions.get(k, {}) or {}
+            total = int(db_sessions.get(k) or p.get("totalL0") or 0)
+            offset = int(p.get("nextOffset") or 0)
+            if total > 0:
+                offset = min(offset, total)
+            done = bool(p.get("completed")) and (total == 0 or offset >= total)
+            sessions.append({
+                "key": k, "offset": offset, "total": total,
+                "done": done, "running": not done and offset > 0
+            })
         completed = sum(1 for s in sessions if s["done"])
         running   = sum(1 for s in sessions if s["running"])
         queued    = len(sessions) - completed - running
-        sessions.sort(key=lambda x: (x["done"], -(x["offset"] or 0)))
+        sessions.sort(key=lambda x: (x["done"], x["offset"] == 0, -(x["offset"] or 0), -(x["total"] or 0)))
         months[month] = {
             "sessions": sessions,
+            "l0": l0, "l0_fts": l0_fts, "l0_vec": l0_vec,
             "l1": l1, "fts": fts, "vec": vec,
             "completed": completed, "running": running, "queued": queued,
             "remaining": max(0, len(sessions) - completed - running),
@@ -174,16 +196,17 @@ def render_html(state):
     <span class="month-name">{month}</span>
     <span class="badge {badge_cls}">{badge_txt}</span>
     <span style="margin-left:auto;font-size:12px;color:#6e7681">
-      {done}/{total} sessions &nbsp;|&nbsp; {pct}% &nbsp;|&nbsp; L1={m['l1']} &nbsp;|&nbsp; <span id="ts-{month}"></span>
+      {done}/{total} sessions &nbsp;|&nbsp; {pct}% &nbsp;|&nbsp; L0={m['l0']} &nbsp;|&nbsp; L1={m['l1']} &nbsp;|&nbsp; <span id="ts-{month}"></span>
     </span>
   </div>
   <div class="stats">
     <div class="stat"><div class="stat-label">Sessions Done</div><div class="stat-value green">{done}</div></div>
     <div class="stat"><div class="stat-label">In Progress</div><div class="stat-value blue">{running}</div></div>
     <div class="stat"><div class="stat-label">Remaining</div><div class="stat-value">{m['remaining']}</div></div>
+    <div class="stat"><div class="stat-label">L0 Rows</div><div class="stat-value">{m['l0']}</div></div>
     <div class="stat"><div class="stat-label">L1 Stored</div><div class="stat-value">{m['l1']}</div></div>
-    <div class="stat"><div class="stat-label">FTS Covered</div><div class="stat-value green">{m['fts']}</div></div>
-    <div class="stat"><div class="stat-label">Vec Covered</div><div class="stat-value green">{m['vec']}</div></div>
+    <div class="stat"><div class="stat-label">L1 FTS</div><div class="stat-value green">{m['fts']}</div></div>
+    <div class="stat"><div class="stat-label">L1 Vec</div><div class="stat-value green">{m['vec']}</div></div>
   </div>
   <div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div>"""
         if types_str:
