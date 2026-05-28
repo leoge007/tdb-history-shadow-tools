@@ -104,6 +104,8 @@ These artifacts are operational state only. They do not modify live TencentDB Ag
 
 For ongoing L1 catch-up runs over large existing L0 bases (e.g. thousands of sessions across multiple months), the `tdb-l1-dashboard.py` script provides a local web UI so you can monitor progress and resume interrupted batches without relying on terminal output.
 
+![TDB L1 Catch-up Dashboard](docs/assets/tdb-l1-dashboard.png)
+
 ### Starting the dashboard
 
 ```bash
