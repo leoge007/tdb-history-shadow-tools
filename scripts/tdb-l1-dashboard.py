@@ -11,7 +11,7 @@ Actions:
   - POST /resume?month=2026-04  →  trigger next batch via node script
 """
 
-import http.server, json, pathlib, subprocess, urllib.parse, sqlite3
+import http.server, json, pathlib, subprocess, urllib.parse, sqlite3, re, time
 from pathlib import Path
 
 PORT = 7842
@@ -46,6 +46,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
 .stat-value { font-size: 20px; font-weight: 700; color: #e6edf3; margin-top: 3px; }
 .stat-value.green { color: #3fb950; }
 .stat-value.blue  { color: #58a6ff; }
+.stat-value.red   { color: #f85149; }
 .progress-bar { background: #21262d; border-radius: 4px; height: 6px;
                  overflow: hidden; margin-bottom: 14px; }
 .progress-fill { background: linear-gradient(90deg, #238636, #3fb950); height: 100%;
@@ -90,6 +91,66 @@ button:disabled  { opacity: .4; cursor: default; }
 .card-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .card-dot.running { background: #3fb950; animation: breathe 2s ease-in-out infinite; }
 """
+
+
+def format_age(seconds):
+    if seconds is None:
+        return "-"
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s ago"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s ago"
+    return f"{seconds // 3600}h {(seconds % 3600) // 60}m ago"
+
+
+def get_importer_state():
+    processes = []
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-fl", "tdb-l1-catchup-existing-l0.mjs"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        out = ""
+    for line in out.splitlines():
+        parts = line.split(" ", 1)
+        if not parts:
+            continue
+        pid = parts[0]
+        cmd = parts[1] if len(parts) > 1 else ""
+        if "tdb-l1-catchup-existing-l0.mjs" not in cmd:
+            continue
+        month_match = re.search(r"--month\s+(\d{4}-\d{2})", cmd)
+        month = month_match.group(1) if month_match else "-"
+        processes.append({"pid": pid, "month": month})
+
+    active_months = sorted({p["month"] for p in processes if p["month"] != "-"})
+    progress_files = []
+    if PROGRESS_DIR.exists():
+        progress_files = list(PROGRESS_DIR.glob("*-progress.json"))
+    if active_months:
+        progress_files = [
+            p for p in progress_files
+            if any(p.name.startswith(f"{month}-") for month in active_months)
+        ]
+    latest_mtime = None
+    for p in progress_files:
+        try:
+            latest_mtime = max(latest_mtime or 0, p.stat().st_mtime)
+        except Exception:
+            pass
+    age = (time.time() - latest_mtime) if latest_mtime else None
+    return {
+        "running": len(processes) > 0,
+        "pids": [p["pid"] for p in processes],
+        "active_months": active_months,
+        "process_count": len(processes),
+        "last_progress_at": time.strftime("%H:%M:%S", time.localtime(latest_mtime)) if latest_mtime else "-",
+        "last_progress_age_seconds": int(age) if age is not None else None,
+        "last_progress_age": format_age(age),
+    }
 
 
 def get_state():
@@ -197,19 +258,28 @@ def render_html(state):
     rows_remaining = max(0, rows_total - rows_done)
     overall_pct = round(rows_done / rows_total * 100) if rows_total else 0
     total_l1 = sum(m["l1"] for m in state.values())
+    importer = get_importer_state()
+    importer_cls = "green" if importer["running"] else "red"
+    importer_text = "RUNNING" if importer["running"] else "STOPPED"
+    active_months = ", ".join(importer["active_months"]) if importer["active_months"] else "-"
+    pids = ", ".join(importer["pids"]) if importer["pids"] else "-"
     html += f"""
 <div class="summary-card">
   <div class="summary-title">Overall Import Countdown</div>
   <div class="stats">
+    <div class="stat"><div class="stat-label">Importer</div><div class="stat-value {importer_cls}">{importer_text}</div></div>
+    <div class="stat"><div class="stat-label">Active Month</div><div class="stat-value blue">{active_months}</div></div>
+    <div class="stat"><div class="stat-label">PID</div><div class="stat-value">{pids}</div></div>
+    <div class="stat"><div class="stat-label">Last Progress</div><div class="stat-value">{importer['last_progress_age']}</div></div>
     <div class="stat"><div class="stat-label">Rows Done</div><div class="stat-value green">{rows_done:,}</div></div>
     <div class="stat"><div class="stat-label">Rows Remaining</div><div class="stat-value">{rows_remaining:,}</div></div>
     <div class="stat"><div class="stat-label">Total Rows</div><div class="stat-value">{rows_total:,}</div></div>
     <div class="stat"><div class="stat-label">Sessions Done</div><div class="stat-value green">{done_sessions}/{total_sessions}</div></div>
-    <div class="stat"><div class="stat-label">Running</div><div class="stat-value blue">{running_sessions}</div></div>
+    <div class="stat"><div class="stat-label">Session Running</div><div class="stat-value blue">{running_sessions}</div></div>
     <div class="stat"><div class="stat-label">L1 Stored</div><div class="stat-value">{total_l1:,}</div></div>
   </div>
   <div class="progress-bar"><div class="progress-fill" style="width:{overall_pct}%"></div></div>
-  <div class="l1-types">{overall_pct}% complete by L0 rows · {remaining_sessions} sessions remaining</div>
+  <div class="l1-types">{overall_pct}% complete by L0 rows · {remaining_sessions} sessions remaining · last write {importer['last_progress_at']}</div>
 </div>"""
     for month, m in state.items():
         done = m["completed"]; running = m["running"]
@@ -329,7 +399,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path.startswith("/api/state"):
             state = get_state()
-            body = json.dumps({"months": state}).encode("utf-8")
+            body = json.dumps({"months": state, "importer": get_importer_state()}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.send_header("Content-Length", str(len(body)))
