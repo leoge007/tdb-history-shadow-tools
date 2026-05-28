@@ -341,6 +341,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"TDB L1 Dashboard → http://0.0.0.0:{PORT}")
-    srv = http.server.HTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"TDB L1 Dashboard → http://127.0.0.1:{PORT}")
+    srv = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
     srv.serve_forever()
